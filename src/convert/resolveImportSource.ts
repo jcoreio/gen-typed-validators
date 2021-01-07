@@ -3,12 +3,15 @@ import { NodePath } from '@babel/traverse'
 import NodeConversionError from '../NodeConversionError'
 import * as Path from 'path'
 
-export default function resolveImportSource(
+type Resolve = (file: string, options: { basedir: string }) => Promise<string>
+
+export default async function resolveImportSource(
+  resolve: Resolve,
   file: string,
   declaration:
     | NodePath<t.ImportDeclaration>
     | NodePath<t.ExportNamedDeclaration>
-): string {
+): Promise<string> {
   const source = declaration.node.source?.value
   if (!source) {
     throw new Error(`expected node to have source`)
@@ -20,5 +23,5 @@ export default function resolveImportSource(
       declaration
     )
   }
-  return Path.resolve(Path.dirname(file), source)
+  return await resolve(source, { basedir: Path.dirname(file) })
 }

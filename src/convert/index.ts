@@ -14,10 +14,12 @@ import resolveImportSource from './resolveImportSource'
 import moveImportKindToSpecifiers from './moveImportKindToSpecifiers'
 import areReferencesEqual from './areReferencesEqual'
 import getKey from './getKey'
+import convertUtilityFlowType from './convertUtilityFlowType'
 
 const templates = {
   importTypedValidators: template.statement`import * as T from 'typed-validators'`,
   undefined: template.expression`T.undefined()`,
+  any: template.expression`T.any()`,
   null: template.expression`T.null()`,
   number: template.expression`T.number()`,
   numberLiteral: template.expression`T.number(VALUE)`,
@@ -38,6 +40,7 @@ const templates = {
 
 type GetValidatorName = (typeName: string) => string
 
+type Resolve = (file: string, options: { basedir: string }) => Promise<string>
 type ParseFile = (file: string) => Promise<t.File>
 
 type ConvertedTypeReference = {
@@ -46,12 +49,14 @@ type ConvertedTypeReference = {
     | t.StringLiteral
     | t.QualifiedTypeIdentifier
     | t.TSQualifiedName
-  kind: 'class' | 'type'
+  kind: 'class' | 'alias' | 'any'
 }
 
 export class ConversionContext {
   public readonly t: t.Identifier
   public readonly getValidatorName: GetValidatorName
+  public readonly resolve: Resolve
+  public readonly defaultExact: boolean
   private readonly _parseFile: ParseFile
   private fileContexts: Map<string, FileConversionContext> = new Map()
   public fileASTs: Map<string, t.File> = new Map()
@@ -59,15 +64,21 @@ export class ConversionContext {
   constructor({
     typedValidatorsIdentifier = t.identifier('t'),
     getValidatorName = (typeName: string): string => typeName + 'Type',
+    resolve,
     parseFile,
+    defaultExact = true,
   }: {
     parseFile: ParseFile
+    resolve: Resolve
     typedValidatorsIdentifier?: t.Identifier
     getValidatorName?: GetValidatorName
+    defaultExact?: boolean
   }) {
     this.t = typedValidatorsIdentifier
     this.getValidatorName = getValidatorName
+    this.resolve = resolve
     this._parseFile = parseFile
+    this.defaultExact = defaultExact
   }
 
   parseFile = async (file: string): Promise<t.File> => {
@@ -107,6 +118,9 @@ export class FileConversionContext {
   }
   get parseFile(): ParseFile {
     return this.context.parseFile
+  }
+  get defaultExact(): boolean {
+    return this.context.defaultExact
   }
 
   formatLocation(node: t.Node | NodePath): string {
@@ -257,7 +271,7 @@ export class FileConversionContext {
     const result = await this.convertTypeReference(pathToConvert)
     if (
       pathToConvert.parentPath.isExportDefaultDeclaration() &&
-      result.kind === 'type'
+      result.kind === 'alias'
     ) {
       const exported = this.getValidatorIdentifier('default')
       if (result.converted.type !== 'Identifier') {
@@ -276,7 +290,7 @@ export class FileConversionContext {
     }
     if (
       pathToConvert.parentPath.isExportSpecifier() &&
-      result.kind === 'type'
+      result.kind === 'alias'
     ) {
       const exportTypeSpecifier = pathToConvert.parentPath
         .node as t.ExportSpecifier
@@ -343,7 +357,7 @@ export class FileConversionContext {
         if (parentPath.isExportNamedDeclaration())
           parentPath.insertAfter(t.exportNamedDeclaration(validator))
         else path.insertAfter(validator)
-        return { converted: validatorId, kind: 'type' }
+        return { converted: validatorId, kind: 'alias' }
       }
       case 'TSTypeAliasDeclaration': {
         const { id } = type as t.TSTypeAliasDeclaration
@@ -360,7 +374,7 @@ export class FileConversionContext {
         if (parentPath.isExportNamedDeclaration())
           parentPath.insertAfter(t.exportNamedDeclaration(validator))
         else path.insertAfter(validator)
-        return { converted: validatorId, kind: 'type' }
+        return { converted: validatorId, kind: 'alias' }
       }
       case 'ImportDefaultSpecifier':
       case 'ImportSpecifier': {
@@ -379,11 +393,35 @@ export class FileConversionContext {
             : null) ||
           importDeclaration.node.importKind ||
           'value'
-        const sourceFile = resolveImportSource(this.file, importDeclaration)
+        const source = importDeclaration.node.source.value
+        if (!source) {
+          throw new NodeConversionError(
+            `Expected import to have source`,
+            this.file,
+            importDeclaration
+          )
+        }
+        if (!source.startsWith('.')) {
+          // eslint-disable-next-line no-console
+          console.error(
+            new NodeConversionError(
+              `WARNING: import from dependencies will be typed as any`,
+              this.file,
+              path
+            ).message
+          )
+          return { converted: t.identifier('any'), kind: 'any' }
+        }
+        const sourceFile = await resolveImportSource(
+          this.context.resolve,
+          this.file,
+          importDeclaration
+        )
         const sourceContext = this.context.forFile(sourceFile)
         const { converted, kind } = await sourceContext.convertExport(
           getKey(imported)
         )
+        if (kind === 'any') return { converted, kind }
         if (
           converted.type !== 'Identifier' &&
           converted.type !== 'StringLiteral'
@@ -417,9 +455,25 @@ export class FileConversionContext {
     throw new NodeConversionError(`Unsupported type reference`, this.file, path)
   }
 
+  async convertTypeReferenceToValidator(
+    path: NodePath<any>
+  ): Promise<t.Expression> {
+    const { converted, kind } = await this.convertTypeReference(path)
+    return kind === 'class'
+      ? templates.instanceOf({ T: await this.importT(), CLASS: converted })
+      : kind === 'alias'
+      ? templates.ref({ T: await this.importT(), TYPE: converted })
+      : templates.any({ T: await this.importT() })
+  }
+
   async convert(path: NodePath<any>): Promise<t.Expression> {
     const type = path.node
     switch (type.type) {
+      case 'MixedTypeAnnotation':
+      case 'AnyTypeAnnotation':
+      case 'TSUnknownKeyword':
+      case 'TSAnyKeyword':
+        return templates.any({ T: await this.importT() })
       case 'VoidTypeAnnotation':
       case 'TSVoidKeyword':
       case 'TSUndefinedKeyword':
@@ -572,21 +626,17 @@ export class FileConversionContext {
           path as NodePath<t.TSTypeLiteral>
         )
       case 'GenericTypeAnnotation': {
-        const { converted, kind } = await this.convertTypeReference(
+        const convertedUtility = await convertUtilityFlowType(this, path)
+        if (convertedUtility) return convertedUtility
+        return await this.convertTypeReferenceToValidator(
           (path as NodePath<t.GenericTypeAnnotation>).get('id')
         )
-        return kind === 'class'
-          ? templates.instanceOf({ T: await this.importT(), CLASS: converted })
-          : templates.ref({ T: await this.importT(), TYPE: converted })
       }
       case 'TSTypeReference': {
         if (isTSRecordType(path)) return await convertTSRecordType(this, path)
-        const { converted, kind } = await this.convertTypeReference(
+        return await this.convertTypeReferenceToValidator(
           (path as NodePath<t.TSTypeReference>).get('typeName')
         )
-        return kind === 'class'
-          ? templates.instanceOf({ T: await this.importT(), CLASS: converted })
-          : templates.ref({ T: await this.importT(), TYPE: converted })
       }
     }
     throw new NodeConversionError(`Unsupported type`, this.file, path)

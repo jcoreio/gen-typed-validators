@@ -4,6 +4,7 @@ import normalizeTS from './util/normalizeTS'
 import { ConversionContext } from '../src/convert/index'
 import traverse, { NodePath } from '@babel/traverse'
 import * as t from '@babel/types'
+import * as Path from 'path'
 import { parse } from '@babel/parser'
 
 function assertExpressionsEqual(
@@ -35,6 +36,7 @@ function test(
 ): void {
   it(name, async function() {
     const converted = await new ConversionContext({
+      resolve: async f => f,
       parseFile: async (): Promise<t.File> => parse(''),
     })
       .forFile('temp.js')
@@ -51,6 +53,7 @@ function testError(
   it(name, async function() {
     await expect(
       new ConversionContext({
+        resolve: async f => f,
         parseFile: async (): Promise<t.File> => parse(''),
       })
         .forFile('temp.js')
@@ -64,6 +67,10 @@ async function integrationTest(
   expected: Record<string, string>
 ): Promise<void> {
   const context = new ConversionContext({
+    resolve: async (
+      file: string,
+      { basedir }: { basedir: string }
+    ): Promise<string> => Path.resolve(basedir, file),
     parseFile: async (file: string): Promise<t.File> => {
       const code = input[file]
       if (!code) throw new Error(`file not found: ${file}`)
@@ -406,6 +413,23 @@ describe(`convertTSType`, function() {
         '/foo': `
           class Foo {}
           export default Foo
+        `,
+      }
+    )
+  })
+  it(`converts import from deps to any`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import Foob from 'foo'
+          const FooType = reify as Type<Foob>
+        `,
+      },
+      {
+        '/a': `
+          import Foob from 'foo'
+          import * as t from 'typed-validators'
+          const FooType = t.any()
         `,
       }
     )

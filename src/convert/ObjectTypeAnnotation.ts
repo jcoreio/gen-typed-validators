@@ -16,7 +16,7 @@ export default async function convertObjectTypeAnnotation(
   const obj = path.node
   const properties = path.get('properties')
   const indexers = path.get('indexers') as NodePath<t.ObjectTypeIndexer>[]
-  const { exact } = obj
+  const exact = !obj.exact && !obj.inexact ? context.defaultExact : obj.exact
   if (properties.length === 0 && indexers?.length === 1) {
     const [indexer] = indexers
     return templates.record({

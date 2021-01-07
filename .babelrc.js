@@ -25,5 +25,5 @@ module.exports = function(api) {
     plugins.push('babel-plugin-istanbul')
   }
 
-  return { plugins, presets }
+  return { plugins, presets, sourceType: 'module' }
 }

@@ -5,6 +5,7 @@ import { ConversionContext } from '../src/convert/index'
 import { parse } from '@babel/parser'
 import traverse, { NodePath } from '@babel/traverse'
 import * as t from '@babel/types'
+import * as Path from 'path'
 
 function assertExpressionsEqual(
   actual: t.Expression | string,
@@ -35,6 +36,7 @@ function test(
 ): void {
   it(name, async function() {
     const converted = await new ConversionContext({
+      resolve: async f => f,
       parseFile: async (): Promise<t.File> => parse(''),
     })
       .forFile('temp.js')
@@ -51,6 +53,7 @@ function testError(
   it(name, async function() {
     await expect(
       new ConversionContext({
+        resolve: async f => f,
         parseFile: async (): Promise<t.File> => parse(''),
       })
         .forFile('temp.js')
@@ -64,6 +67,10 @@ async function integrationTest(
   expected: Record<string, string>
 ): Promise<void> {
   const context = new ConversionContext({
+    resolve: async (
+      file: string,
+      { basedir }: { basedir: string }
+    ): Promise<string> => Path.resolve(basedir, file),
     parseFile: async (file: string): Promise<t.File> => {
       const code = input[file]
       if (!code) throw new Error(`file not found: ${file}`)
@@ -84,6 +91,8 @@ async function integrationTest(
 }
 
 describe(`convertFlowType`, function() {
+  test('any', 't.any()')
+  test('mixed', 't.any()')
   test('void', 't.undefined()')
   test('null', 't.null()')
   test('boolean', 't.boolean()')
@@ -95,12 +104,15 @@ describe(`convertFlowType`, function() {
   test('true', 't.boolean<true>(true)')
   test('?number', 't.nullishOr(t.number())')
   test('number[]', 't.array(t.number())')
+  test('Array<number>', 't.array(t.number())')
+  test('$ReadOnlyArray<number>', 't.array(t.number())')
   test('[number, string]', 't.tuple(t.number(), t.string())')
   test('number | string', 't.oneOf(t.number(), t.string())')
   test('number & string', 't.allOf(t.number(), t.string())')
   test('{[string]: number}', 't.record(t.string(), t.number())')
+  test('$ReadOnly<{[string]: number}>', 't.record(t.string(), t.number())')
   test(
-    `{ 'hello-world': string }`,
+    `{ 'hello-world': string, ... }`,
     `t.object({
         exact: false,
         required: {
@@ -134,7 +146,7 @@ describe(`convertFlowType`, function() {
       })`
   )
   test(
-    '{ world?: number }',
+    '{ world?: number, ... }',
     `t.object({
         exact: false,
         optional: {
@@ -483,6 +495,24 @@ describe(`convertFlowType`, function() {
         `,
         '/foo': `
           export default class Foo {}
+        `,
+      }
+    )
+  })
+  it(`converts import from deps to any`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import type Foob from 'foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+      },
+      {
+        '/a': `
+          import type Foob from 'foo'
+          import * as t from 'typed-validators'
+          const FooType = t.any()
         `,
       }
     )
