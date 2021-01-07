@@ -59,13 +59,28 @@ function testError(
   })
 }
 
-type Fixture = {
-  name: string
-  input: string
-  expected?: string
-  error?: string | RegExp
-  only?: boolean
-  skip?: boolean
+async function integrationTest(
+  input: Record<string, string>,
+  expected: Record<string, string>
+): Promise<void> {
+  const context = new ConversionContext({
+    parseFile: async (file: string): Promise<t.File> => {
+      const code = input[file]
+      if (!code) throw new Error(`file not found: ${file}`)
+      return parse(code, {
+        plugins: ['typescript'],
+        sourceType: 'module',
+      })
+    },
+  })
+  for (const file in input) await context.forFile(file).processFile()
+  for (const file in expected) {
+    const ast = context.fileASTs.get(file)
+    if (!ast) throw new Error(`missing result AST for file: ${file}`)
+    expect(normalizeTS(ast), `expected file ${file} to match`).to.equal(
+      normalizeTS(expected[file])
+    )
+  }
 }
 
 describe(`convertTSType`, function() {
@@ -120,4 +135,279 @@ describe(`convertTSType`, function() {
   testError('Record', /Record is missing type parameters/)
   testError('Record<string>', /Record is missing value type/)
   testError('{ [foo + bar]: string }', /Unsupported key type/)
+
+  it(`converts locally reified type alias`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          type Foo = {
+            foo: number
+          }
+          const FooType = reify as Type<Foo>
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          type Foo = {
+            foo: number,
+          }
+          const FooType = t.object({
+            foo: t.number(),
+          })
+        `,
+      }
+    )
+  })
+  it(`converts locally reified builtin type`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          const FooType = reify as Type<number>
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          const FooType = t.number()
+        `,
+      }
+    )
+  })
+  it(`converts locally reified builtin class`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          const FooType = reify as Type<Date>
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Date)
+        `,
+      }
+    )
+  })
+  it(`converts locally reified class`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          class Foo {}
+          const FooType = reify as Type<Foo>
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          class Foo {}
+          const FooType = t.instanceOf(() => Foo)
+        `,
+      }
+    )
+  })
+  it(`converts named type import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          export type Foo = {
+            foo: number
+          }
+        `,
+      },
+      {
+        '/a': `
+          import {Foo as Foob, FooType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          export type Foo = {
+            foo: number
+          }
+          export const FooType = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+        `,
+      }
+    )
+  })
+  it(`converts named type import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          type Foo = {
+            foo: number
+          }
+          export {Foo}
+        `,
+      },
+      {
+        '/a': `
+          import {Foo as Foob, FooType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          type Foo = {
+            foo: number
+          }
+          const FooType = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+          export {Foo}
+          export {FooType}
+        `,
+      }
+    )
+  })
+  it(`converts named class import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          export class Foo {}
+        `,
+      },
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          export class Foo {}
+        `,
+      }
+    )
+  })
+  it(`converts named class import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          class Foo {}
+          export {Foo}
+        `,
+      },
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          class Foo {}
+          export {Foo}
+        `,
+      }
+    )
+  })
+  it(`converts default type import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import Foob from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          type Foo = {
+            foo: number
+          }
+          export default Foo
+        `,
+      },
+      {
+        '/a': `
+          import {default as Foob, defaultType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          type Foo = {
+            foo: number
+          }
+          const FooType = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+          export default Foo
+          export {FooType as defaultType}
+        `,
+      }
+    )
+  })
+  it(`converts default class import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import Foob from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          export default class Foo {}
+        `,
+      },
+      {
+        '/a': `
+          import Foob from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          export default class Foo {}
+        `,
+      }
+    )
+  })
+  it(`converts default class import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import Foob from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          class Foo {}
+          export default Foo
+        `,
+      },
+      {
+        '/a': `
+          import Foob from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          class Foo {}
+          export default Foo
+        `,
+      }
+    )
+  })
 })

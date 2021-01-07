@@ -83,15 +83,6 @@ async function integrationTest(
   }
 }
 
-type Fixture = {
-  name: string
-  input: string
-  expected?: string
-  error?: string | RegExp
-  only?: boolean
-  skip?: boolean
-}
-
 describe(`convertFlowType`, function() {
   test('void', 't.undefined()')
   test('null', 't.null()')
@@ -231,9 +222,7 @@ describe(`convertFlowType`, function() {
       {
         '/a': `
           import * as t from 'typed-validators'
-
           class Foo {}
-
           const FooType = t.instanceOf(() => Foo)
         `,
       }
@@ -386,7 +375,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it.only(`converts default type import that's indirectly exported`, async function() {
+  it(`converts default type import that's indirectly exported`, async function() {
     await integrationTest(
       {
         '/a': `

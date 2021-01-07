@@ -1,7 +1,7 @@
 import * as t from '@babel/types'
 import template from '@babel/template'
 import traverse from '@babel/traverse'
-import convertTSTypeReference from './TSTypeReference'
+import convertTSRecordType, { isTSRecordType } from './TSRecordType'
 import convertObjectTypeAnnotation from './ObjectTypeAnnotation'
 import NodeConversionError from '../NodeConversionError'
 import convertTSTypeLiteral from './TSTypeLiteral'
@@ -12,6 +12,8 @@ import getReifiedType from './getReifiedType'
 import once from '../util/once'
 import resolveImportSource from './resolveImportSource'
 import moveImportKindToSpecifiers from './moveImportKindToSpecifiers'
+import areReferencesEqual from './areReferencesEqual'
+import getKey from './getKey'
 
 const templates = {
   importTypedValidators: template.statement`import * as T from 'typed-validators'`,
@@ -34,18 +36,7 @@ const templates = {
   alias: template.statement`const ID = T.alias(NAME, TYPE)`,
 }
 
-function getImportOrExportName(node: t.Identifier | t.StringLiteral): string {
-  switch (node.type) {
-    case 'Identifier':
-      return node.name
-    case 'StringLiteral':
-      return node.value
-  }
-}
 type GetValidatorName = (typeName: string) => string
-
-type FileNodePath = { file: string; path: NodePath<any> }
-type FileExport = { file: string; exported: string }
 
 type ParseFile = (file: string) => Promise<t.File>
 
@@ -135,7 +126,10 @@ export class FileConversionContext {
 
   async processFile(): Promise<void> {
     const ast = await this.parseFile(this.file)
-    const reifyCalls: NodePath<t.TypeCastExpression>[] = []
+    const reifyCalls: (
+      | NodePath<t.TypeCastExpression>
+      | NodePath<t.TSAsExpression>
+    )[] = []
     traverse(ast, {
       ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
         if (path.node.source.value === 'flow-runtime') path.remove()
@@ -146,8 +140,49 @@ export class FileConversionContext {
           path.skip()
         }
       },
+      TSAsExpression: (path: NodePath<t.TSAsExpression>) => {
+        if (getReifiedType(path)) {
+          reifyCalls.push(path)
+          path.skip()
+        }
+      },
     })
-    await Promise.all(reifyCalls.map(call => this.convert(call)))
+    for (const path of reifyCalls) {
+      const reifiedType = getReifiedType(path)
+      if (reifiedType) {
+        const id = reifiedType.isGenericTypeAnnotation()
+          ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
+          : reifiedType.isTSTypeReference()
+          ? (reifiedType as NodePath<t.TSTypeReference>).get('typeName')
+          : null
+        let converted
+        if (id?.isIdentifier()) {
+          id.scope.path.traverse(TSBindingVisitors)
+          const binding = id.scope.getBinding(id.node.name)
+          if (binding && binding.path.isTypeAlias()) {
+            converted = await this.convert(
+              (binding.path as NodePath<t.TypeAlias>).get('right')
+            )
+          } else if (binding && binding.path.isTSTypeAliasDeclaration()) {
+            converted = await this.convert(
+              (binding.path as NodePath<t.TSTypeAliasDeclaration>).get(
+                'typeAnnotation'
+              )
+            )
+          }
+        }
+        const finalConverted = converted || (await this.convert(reifiedType))
+        if (
+          id?.isIdentifier() &&
+          finalConverted.type === 'Identifier' &&
+          id.node.name === finalConverted.name
+        ) {
+          path.remove()
+        } else {
+          path.replaceWith(finalConverted)
+        }
+      }
+    }
   }
 
   importT = once(
@@ -191,7 +226,7 @@ export class FileConversionContext {
           }
         },
         ExportSpecifier: (path: NodePath<t.ExportSpecifier>) => {
-          if (getImportOrExportName(path.node.exported) === 'default') {
+          if (getKey(path.node.exported) === 'default') {
             path.stop()
             pathToConvert = path.get('local')
           }
@@ -204,13 +239,13 @@ export class FileConversionContext {
         ExportNamedDeclaration: (path: NodePath<t.ExportNamedDeclaration>) => {
           const declaration = path.get('declaration')
           const node: any = declaration.node
-          if (node?.id && getImportOrExportName(node.id) === name) {
+          if (node?.id && getKey(node.id) === name) {
             path.stop()
             pathToConvert = declaration
           }
         },
         ExportSpecifier: (path: NodePath<t.ExportSpecifier>) => {
-          if (getImportOrExportName(path.node.exported) === name) {
+          if (getKey(path.node.exported) === name) {
             path.stop()
             pathToConvert = path.get('exported')
           }
@@ -220,6 +255,25 @@ export class FileConversionContext {
     if (!pathToConvert)
       throw new Error(`export ${name} not found in file: ${this.file}`)
     const result = await this.convertTypeReference(pathToConvert)
+    if (
+      pathToConvert.parentPath.isExportDefaultDeclaration() &&
+      result.kind === 'type'
+    ) {
+      const exported = this.getValidatorIdentifier('default')
+      if (result.converted.type !== 'Identifier') {
+        throw new NodeConversionError(
+          `need converted export to be an identifier`,
+          this.file,
+          pathToConvert
+        )
+      }
+      pathToConvert.parentPath.insertAfter(
+        t.exportNamedDeclaration(null, [
+          t.exportSpecifier(result.converted, exported),
+        ])
+      )
+      return { converted: exported, kind: result.kind }
+    }
     if (
       pathToConvert.parentPath.isExportSpecifier() &&
       result.kind === 'type'
@@ -234,7 +288,7 @@ export class FileConversionContext {
         )
       }
       const exported =
-        getImportOrExportName(exportTypeSpecifier.exported) === 'default'
+        getKey(exportTypeSpecifier.exported) === 'default'
           ? this.getValidatorIdentifier('default')
           : result.converted
       pathToConvert.parentPath.parentPath.insertAfter(
@@ -242,7 +296,7 @@ export class FileConversionContext {
           t.exportSpecifier(result.converted, exported),
         ])
       )
-      if (getImportOrExportName(exportTypeSpecifier.exported) === 'default')
+      if (getKey(exportTypeSpecifier.exported) === 'default')
         return { converted: exported, kind: result.kind }
     }
     return result
@@ -265,6 +319,7 @@ export class FileConversionContext {
     switch (type.type) {
       case 'Identifier': {
         const id = path as NodePath<t.Identifier>
+        id.scope.path.traverse(TSBindingVisitors)
         const binding = id.scope.getBinding(id.node.name)
         if (binding) return await this.convertTypeReference(binding.path)
         if (builtinClasses.has(id.node.name))
@@ -327,7 +382,7 @@ export class FileConversionContext {
         const sourceFile = resolveImportSource(this.file, importDeclaration)
         const sourceContext = this.context.forFile(sourceFile)
         const { converted, kind } = await sourceContext.convertExport(
-          getImportOrExportName(imported)
+          getKey(imported)
         )
         if (
           converted.type !== 'Identifier' &&
@@ -340,7 +395,7 @@ export class FileConversionContext {
           )
         }
         const id = kind === 'class' ? local : this.getValidatorIdentifier(local)
-        if (importKind === 'type') {
+        if (importKind === 'type' || !areReferencesEqual(imported, converted)) {
           const finalPath =
             path.isImportDefaultSpecifier() && kind !== 'class'
               ? (path.replaceWith(
@@ -516,12 +571,6 @@ export class FileConversionContext {
           this,
           path as NodePath<t.TSTypeLiteral>
         )
-      case 'TSTypeReference':
-        return await convertTSTypeReference(
-          this,
-          path as NodePath<t.TSTypeReference>
-        )
-
       case 'GenericTypeAnnotation': {
         const { converted, kind } = await this.convertTypeReference(
           (path as NodePath<t.GenericTypeAnnotation>).get('id')
@@ -530,37 +579,14 @@ export class FileConversionContext {
           ? templates.instanceOf({ T: await this.importT(), CLASS: converted })
           : templates.ref({ T: await this.importT(), TYPE: converted })
       }
-      case 'TypeCastExpression': {
-        const reifiedType = getReifiedType(
-          path as NodePath<t.TypeCastExpression>
+      case 'TSTypeReference': {
+        if (isTSRecordType(path)) return await convertTSRecordType(this, path)
+        const { converted, kind } = await this.convertTypeReference(
+          (path as NodePath<t.TSTypeReference>).get('typeName')
         )
-        if (reifiedType) {
-          const id = reifiedType.isGenericTypeAnnotation()
-            ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
-            : null
-          let converted
-          if (id?.isIdentifier()) {
-            id.scope.path.traverse(TSBindingVisitors)
-            const binding = id.scope.getBinding(id.node.name)
-            if (binding && binding.path.isTypeAlias()) {
-              converted = await this.convert(
-                (binding.path as NodePath<t.TypeAlias>).get('right')
-              )
-            }
-          }
-          if (!converted) converted = await this.convert(reifiedType)
-          if (
-            id?.isIdentifier() &&
-            converted.type === 'Identifier' &&
-            id.node.name === converted.name
-          ) {
-            path.remove()
-          } else {
-            path.replaceWith(converted)
-          }
-          return converted
-        }
-        break
+        return kind === 'class'
+          ? templates.instanceOf({ T: await this.importT(), CLASS: converted })
+          : templates.ref({ T: await this.importT(), TYPE: converted })
       }
     }
     throw new NodeConversionError(`Unsupported type`, this.file, path)
