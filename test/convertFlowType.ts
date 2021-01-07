@@ -1,8 +1,7 @@
 import { describe, it } from 'mocha'
 import { expect } from 'chai'
 import normalizeFlow from './util/normalizeFlow'
-import { FileConversionContext } from '../src/convert/index'
-import dedent from 'dedent'
+import { ConversionContext } from '../src/convert/index'
 import { parse } from '@babel/parser'
 import traverse, { NodePath } from '@babel/traverse'
 import * as t from '@babel/types'
@@ -29,20 +28,17 @@ function getFlowTypePath(code: string): NodePath<any> {
   return path
 }
 
-function notImplemented(): any {
-  throw new Error('not implemented')
-}
-
 function test(
   input: string,
   expected: string,
   { name = `${input} -> ${expected}` }: { name?: string } = {}
 ): void {
   it(name, async function() {
-    const converted = await new FileConversionContext({
-      file: 'temp.js',
-      parseFile: notImplemented,
-    }).convert(getFlowTypePath(input))
+    const converted = await new ConversionContext({
+      parseFile: async (): Promise<t.File> => parse(''),
+    })
+      .forFile('temp.js')
+      .convert(getFlowTypePath(input))
     assertExpressionsEqual(converted, expected)
   })
 }
@@ -54,12 +50,37 @@ function testError(
 ): void {
   it(name, async function() {
     await expect(
-      new FileConversionContext({
-        file: 'temp.js',
-        parseFile: notImplemented,
-      }).convert(getFlowTypePath(input))
+      new ConversionContext({
+        parseFile: async (): Promise<t.File> => parse(''),
+      })
+        .forFile('temp.js')
+        .convert(getFlowTypePath(input))
     ).to.be.rejectedWith(expected)
   })
+}
+
+async function integrationTest(
+  input: Record<string, string>,
+  expected: Record<string, string>
+): Promise<void> {
+  const context = new ConversionContext({
+    parseFile: async (file: string): Promise<t.File> => {
+      const code = input[file]
+      if (!code) throw new Error(`file not found: ${file}`)
+      return parse(code, {
+        plugins: [['flow', { all: true }]],
+        sourceType: 'module',
+      })
+    },
+  })
+  for (const file in input) await context.forFile(file).processFile()
+  for (const file in expected) {
+    const ast = context.fileASTs.get(file)
+    if (!ast) throw new Error(`missing result AST for file: ${file}`)
+    expect(normalizeFlow(ast), `expected file ${file} to match`).to.equal(
+      normalizeFlow(expected[file])
+    )
+  }
 }
 
 type Fixture = {
@@ -142,240 +163,301 @@ describe(`convertFlowType`, function() {
     /Multiple indexers aren't supported/
   )
 
-  function findPath<T extends t.Node>(
-    ast: t.File,
-    type: T['type']
-  ): NodePath<T> {
-    let result: NodePath<T> | undefined
-    traverse(ast, {
-      enter(path: NodePath<any>) {
-        if (path.node.type === type) {
-          result = path
-          path.stop()
-        }
+  it(`converts locally reified type alias`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          type Foo = {|
+            foo: number
+          |}
+          const FooType = (reify: Type<Foo>)
+        `,
       },
-    })
-    if (!result) throw new Error(`failed to find a ${type} node`)
-    return result
-  }
-
-  class TypeReferenceSpy {
-    typeRefs: { file: string; node: string }[] = []
-
-    onTypeReference = ({
-      file,
-      path,
-    }: {
-      file: string
-      path: NodePath<any>
-    }): any => this.typeRefs.push({ file, node: normalizeFlow(path) })
-  }
-
-  describe(`builtin class conversion`, function() {
-    for (const klass of ['Date']) {
-      it(klass, async function() {
-        const a = dedent`
-      // @flow
-      type Test = Date[]
-    `
-
-        const parseFile = async (file: string): Promise<t.File> => {
-          switch (file) {
-            case '/a':
-              return parse(a, { plugins: ['flow'], sourceType: 'module' })
-          }
-        }
-
-        const { typeRefs, onTypeReference } = new TypeReferenceSpy()
-
-        const converted = await new FileConversionContext({
-          file: '/a',
-          parseFile,
-          onTypeReference,
-        }).convert(findPath(await parseFile('/a'), 'ArrayTypeAnnotation'))
-        assertExpressionsEqual(converted, `t.array(t.instanceOf(() => Date))`)
-        expect(typeRefs).to.deep.equal([])
-      })
-    }
-  })
-
-  it(`local class conversion`, async function() {
-    const a = dedent`
-      class B {}
-      type Test = B[]
-    `
-
-    const parseFile = async (file: string): Promise<t.File> => {
-      switch (file) {
-        case '/a':
-          return parse(a, { plugins: ['flow'], sourceType: 'module' })
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          type Foo = {|
+            foo: number,
+          |}
+          const FooType = t.object({
+            foo: t.number(),
+          })
+        `,
       }
-    }
-
-    const { typeRefs, onTypeReference } = new TypeReferenceSpy()
-
-    const converted = await new FileConversionContext({
-      file: '/a',
-      parseFile,
-      onTypeReference,
-    }).convert(findPath(await parseFile('/a'), 'ArrayTypeAnnotation'))
-    assertExpressionsEqual(converted, `t.array(t.instanceOf(() => B))`)
-    expect(typeRefs).to.deep.equal([
-      { file: '/a', node: normalizeFlow(`class B {}`) },
-    ])
+    )
   })
-
-  it(`local type alias conversion`, async function() {
-    const a = dedent`
-      type B = {}
-      type Test = B[]
-    `
-
-    const parseFile = async (file: string): Promise<t.File> => {
-      switch (file) {
-        case '/a':
-          return parse(a, { plugins: ['flow'], sourceType: 'module' })
+  it(`converts locally reified builtin type`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          const FooType = (reify: Type<number>)
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          const FooType = t.number()
+        `,
       }
-    }
-
-    const { typeRefs, onTypeReference } = new TypeReferenceSpy()
-
-    const converted = await new FileConversionContext({
-      file: '/a',
-      parseFile,
-      onTypeReference,
-    }).convert(findPath(await parseFile('/a'), 'ArrayTypeAnnotation'))
-    assertExpressionsEqual(converted, `t.array(t.ref(() => BType))`)
-    expect(typeRefs).to.deep.equal([
-      { file: '/a', node: normalizeFlow(`type B = {}`) },
-    ])
+    )
   })
-
-  it(`class import conversion`, async function() {
-    const a = dedent`
-      // @flow
-      import B from './b'
-      type Test = B[]
-    `
-    const b = dedent`
-      // @flow
-      export default class B { }
-    `
-
-    const parseFile = async (file: string): Promise<t.File> => {
-      switch (file) {
-        case '/a':
-          return parse(a, { plugins: ['flow'], sourceType: 'module' })
-        case '/b':
-          return parse(b, { plugins: ['flow'], sourceType: 'module' })
+  it(`converts locally reified builtin class`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          const FooType = (reify: Type<Date>)
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Date)
+        `,
       }
-    }
-
-    const { typeRefs, onTypeReference } = new TypeReferenceSpy()
-
-    const converted = await new FileConversionContext({
-      file: '/a',
-      parseFile,
-      onTypeReference,
-    }).convert(findPath(await parseFile('/a'), 'ArrayTypeAnnotation'))
-    assertExpressionsEqual(converted, `t.array(t.instanceOf(() => B))`)
-    expect(typeRefs).to.deep.equal([
-      { file: '/b', node: normalizeFlow(`class B {}`) },
-    ])
+    )
   })
+  it(`converts locally reified class`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          class Foo {}
+          const FooType = (reify: Type<Foo>)
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
 
-  it(`namespaced class import conversion`, async function() {
-    const a = dedent`
-      // @flow
-      import * as b from './b'
-      type Test = b.B[]
-    `
-    const b = dedent`
-      // @flow
-      export class B { }
-    `
+          class Foo {}
 
-    const parseFile = async (file: string): Promise<t.File> => {
-      switch (file) {
-        case '/a':
-          return parse(a, { plugins: ['flow'], sourceType: 'module' })
-        case '/b':
-          return parse(b, { plugins: ['flow'], sourceType: 'module' })
+          const FooType = t.instanceOf(() => Foo)
+        `,
       }
-    }
-
-    const { typeRefs, onTypeReference } = new TypeReferenceSpy()
-
-    const converted = await new FileConversionContext({
-      file: '/a',
-      parseFile,
-      onTypeReference,
-    }).convert(findPath(await parseFile('/a'), 'ArrayTypeAnnotation'))
-    assertExpressionsEqual(converted, `t.array(t.instanceOf(() => b.B))`)
-    expect(typeRefs).to.deep.equal([
-      { file: '/b', node: normalizeFlow(`class B {}`) },
-    ])
+    )
   })
-
-  it(`imported type alias conversion`, async function() {
-    const a = dedent`
-      import type { B } from './b'
-      type Test = B[]
-    `
-    const b = dedent`
-      export type B = {}
-    `
-
-    const parseFile = async (file: string): Promise<t.File> => {
-      switch (file) {
-        case '/a':
-          return parse(a, { plugins: ['flow'], sourceType: 'module' })
-        case '/b':
-          return parse(b, { plugins: ['flow'], sourceType: 'module' })
+  it(`converts named type import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import {type Foo as Foob} from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          export type Foo = {|
+            foo: number
+          |}
+        `,
+      },
+      {
+        '/a': `
+          import {type Foo as Foob, FooType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          export type Foo = {|
+            foo: number
+          |}
+          export const FooType = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+        `,
       }
-    }
-
-    const { typeRefs, onTypeReference } = new TypeReferenceSpy()
-
-    const converted = await new FileConversionContext({
-      file: '/a',
-      parseFile,
-      onTypeReference,
-    }).convert(findPath(await parseFile('/a'), 'ArrayTypeAnnotation'))
-    assertExpressionsEqual(converted, `t.array(t.ref(() => BType))`)
-    expect(typeRefs).to.deep.equal([
-      { file: '/b', node: normalizeFlow(`type B = {}`) },
-    ])
+    )
   })
-
-  it(`namespaced imported type alias conversion`, async function() {
-    const a = dedent`
-      import * as b from './b'
-      type Test = b.B[]
-    `
-    const b = dedent`
-      export type B = {}
-    `
-
-    const parseFile = async (file: string): Promise<t.File> => {
-      switch (file) {
-        case '/a':
-          return parse(a, { plugins: ['flow'], sourceType: 'module' })
-        case '/b':
-          return parse(b, { plugins: ['flow'], sourceType: 'module' })
+  it(`converts named type import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import {type Foo as Foob} from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          type Foo = {|
+            foo: number
+          |}
+          export type {Foo}
+        `,
+      },
+      {
+        '/a': `
+          import {type Foo as Foob, FooType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          type Foo = {|
+            foo: number
+          |}
+          const FooType = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+          export type {Foo}
+          export {FooType}
+        `,
       }
-    }
-
-    const { typeRefs, onTypeReference } = new TypeReferenceSpy()
-
-    const converted = await new FileConversionContext({
-      file: '/a',
-      parseFile,
-      onTypeReference,
-    }).convert(findPath(await parseFile('/a'), 'ArrayTypeAnnotation'))
-    assertExpressionsEqual(converted, `t.array(t.ref(() => b.BType))`)
-    expect(typeRefs).to.deep.equal([
-      { file: '/b', node: normalizeFlow(`type B = {}`) },
-    ])
+    )
+  })
+  it(`converts named class import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import {Foo as Foob} from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          export class Foo {}
+        `,
+      },
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          export class Foo {}
+        `,
+      }
+    )
+  })
+  it(`converts named class import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import {Foo as Foob} from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          class Foo {}
+          export {Foo}
+        `,
+      },
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          class Foo {}
+          export {Foo}
+        `,
+      }
+    )
+  })
+  it(`converts named class type import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import {type Foo as Foob} from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          export class Foo {}
+        `,
+      },
+      {
+        '/a': `
+          import {Foo as Foob} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          export class Foo {}
+        `,
+      }
+    )
+  })
+  it(`converts default class import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import Foob from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          export default class Foo {}
+        `,
+      },
+      {
+        '/a': `
+          import Foob from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          export default class Foo {}
+        `,
+      }
+    )
+  })
+  it(`converts default class import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import Foob from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          class Foo {}
+          export default Foo
+        `,
+      },
+      {
+        '/a': `
+          import Foob from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          class Foo {}
+          export default Foo
+        `,
+      }
+    )
+  })
+  it(`converts default class type import`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import type Foob from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          export default class Foo {}
+        `,
+      },
+      {
+        '/a': `
+          import Foob from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.instanceOf(() => Foob)
+        `,
+        '/foo': `
+          export default class Foo {}
+        `,
+      }
+    )
   })
 })

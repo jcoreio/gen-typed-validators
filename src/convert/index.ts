@@ -1,26 +1,20 @@
 import * as t from '@babel/types'
-import * as Path from 'path'
 import template from '@babel/template'
 import traverse from '@babel/traverse'
 import convertTSTypeReference from './TSTypeReference'
 import convertObjectTypeAnnotation from './ObjectTypeAnnotation'
 import NodeConversionError from '../NodeConversionError'
 import convertTSTypeLiteral from './TSTypeLiteral'
-import convertGenericTypeAnnotation from './GenericTypeAnnotation'
 import { NodePath } from '@babel/traverse'
 import { builtinClasses } from './builtinClasses'
 import { TSBindingVisitors } from '../ts/TSBindingVisitors'
-
-function getImportOrExportName(node: t.Identifier | t.StringLiteral): string {
-  switch (node.type) {
-    case 'Identifier':
-      return node.name
-    case 'StringLiteral':
-      return node.value
-  }
-}
+import getReifiedType from './getReifiedType'
+import once from '../util/once'
+import resolveImportSource from './resolveImportSource'
+import moveImportKindToSpecifiers from './moveImportKindToSpecifiers'
 
 const templates = {
+  importTypedValidators: template.statement`import * as T from 'typed-validators'`,
   undefined: template.expression`T.undefined()`,
   null: template.expression`T.null()`,
   number: template.expression`T.number()`,
@@ -36,49 +30,92 @@ const templates = {
   oneOf: template.expression(`%%T%%.oneOf(%%TYPES%%)`),
   allOf: template.expression(`%%T%%.allOf(%%TYPES%%)`),
   instanceOf: template.expression`T.instanceOf(() => CLASS)`,
-  ref: template.expression`T.ref(() => ALIAS)`,
-  alias: template.expression`ID = T.alias(NAME, TYPE)`,
+  ref: template.expression`T.ref(() => TYPE)`,
+  alias: template.statement`const ID = T.alias(NAME, TYPE)`,
 }
 
+function getImportOrExportName(node: t.Identifier | t.StringLiteral): string {
+  switch (node.type) {
+    case 'Identifier':
+      return node.name
+    case 'StringLiteral':
+      return node.value
+  }
+}
 type GetValidatorName = (typeName: string) => string
 
 type FileNodePath = { file: string; path: NodePath<any> }
 type FileExport = { file: string; exported: string }
 
-type OnTypeReference = (path: FileNodePath) => unknown
-type OnExportReference = (_export: FileExport) => unknown
-
 type ParseFile = (file: string) => Promise<t.File>
 
-export class FileConversionContext {
+type ConvertedTypeReference = {
+  converted:
+    | t.Identifier
+    | t.StringLiteral
+    | t.QualifiedTypeIdentifier
+    | t.TSQualifiedName
+  kind: 'class' | 'type'
+}
+
+export class ConversionContext {
   public readonly t: t.Identifier
   public readonly getValidatorName: GetValidatorName
-  public readonly file: string
-  public readonly onTypeReference: OnTypeReference
-  public readonly onExportReference: OnExportReference
-  public readonly parseFile: ParseFile
+  private readonly _parseFile: ParseFile
+  private fileContexts: Map<string, FileConversionContext> = new Map()
+  public fileASTs: Map<string, t.File> = new Map()
 
   constructor({
     typedValidatorsIdentifier = t.identifier('t'),
-    file,
     getValidatorName = (typeName: string): string => typeName + 'Type',
-    onTypeReference = (): unknown => null,
-    onExportReference = (): unknown => null,
     parseFile,
   }: {
-    file: string
     parseFile: ParseFile
     typedValidatorsIdentifier?: t.Identifier
     getValidatorName?: GetValidatorName
-    onTypeReference?: OnTypeReference
-    onExportReference?: OnExportReference
   }) {
     this.t = typedValidatorsIdentifier
-    this.file = file
     this.getValidatorName = getValidatorName
-    this.onTypeReference = onTypeReference
-    this.onExportReference = onExportReference
-    this.parseFile = parseFile
+    this._parseFile = parseFile
+  }
+
+  parseFile = async (file: string): Promise<t.File> => {
+    let ast = this.fileASTs.get(file)
+    if (ast) return ast
+    ast = await this._parseFile(file)
+    this.fileASTs.set(file, ast)
+    return ast
+  }
+
+  forFile(file: string): FileConversionContext {
+    const existing = this.fileContexts.get(file)
+    if (existing) return existing
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    const result = new FileConversionContext({ context: this, file })
+    this.fileContexts.set(file, result)
+    return result
+  }
+}
+
+export class FileConversionContext {
+  public readonly context: ConversionContext
+  public readonly file: string
+  private importTResult: Promise<t.Identifier> | undefined
+  private convertedTypeReferences: Map<
+    t.Node,
+    ConvertedTypeReference
+  > = new Map()
+
+  constructor({ context, file }: { context: ConversionContext; file: string }) {
+    this.context = context
+    this.file = file
+  }
+
+  get getValidatorName(): GetValidatorName {
+    return this.context.getValidatorName
+  }
+  get parseFile(): ParseFile {
+    return this.context.parseFile
   }
 
   formatLocation(node: t.Node | NodePath): string {
@@ -96,52 +133,225 @@ export class FileConversionContext {
     return t.identifier(this.getValidatorName(type.name))
   }
 
-  async isClass(
-    path: NodePath<t.GenericTypeAnnotation> | NodePath<t.TSTypeReference>
-  ): Promise<boolean> {
-    let binding: FileNodePath | null | undefined
-    if (path.isGenericTypeAnnotation()) {
-      binding = await this.lookupBinding(this.file, path.get('id'))
-    } else if (path.isTSTypeReference()) {
-      binding = await this.lookupBinding(this.file, path.get('typeName'))
-    }
-
-    if (!binding) {
-      if (path.isGenericTypeAnnotation()) {
-        const id = path.get('id')
-        if (id.isIdentifier() && builtinClasses.has(id.node.name)) return true
-      } else if (path.isTSTypeReference()) {
-        const id = path.get('typeName')
-        if (id.isIdentifier() && builtinClasses.has(id.node.name)) return true
-      }
-      throw new NodeConversionError(`Couldn't lookup binding`, this.file, path)
-    }
-
-    return binding.path.isClassDeclaration()
+  async processFile(): Promise<void> {
+    const ast = await this.parseFile(this.file)
+    const reifyCalls: NodePath<t.TypeCastExpression>[] = []
+    traverse(ast, {
+      ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
+        if (path.node.source.value === 'flow-runtime') path.remove()
+      },
+      TypeCastExpression: (path: NodePath<t.TypeCastExpression>) => {
+        if (getReifiedType(path)) {
+          reifyCalls.push(path)
+          path.skip()
+        }
+      },
+    })
+    await Promise.all(reifyCalls.map(call => this.convert(call)))
   }
 
-  async convertTypeAlias(
-    path: NodePath<t.TypeAlias> | NodePath<t.TSTypeAliasDeclaration>
-  ): Promise<t.Expression> {
-    const alias = path.node
-    if (path.isTypeAlias()) {
-      const id = this.getValidatorIdentifier(alias.id)
-      return templates.alias({
-        T: this.t,
-        ID: id,
-        NAME: t.stringLiteral(id.name),
-        TYPE: await this.convert(path.get('right')),
+  importT = once(
+    async (): Promise<t.Identifier> => {
+      const ast = await this.parseFile(this.file)
+      let program: NodePath<t.Program> | undefined
+      let lastImport: NodePath<t.ImportDeclaration> | undefined
+      traverse(ast, {
+        Program: (path: NodePath<t.Program>) => {
+          program = path
+        },
+        ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
+          lastImport = path
+        },
       })
-    } else if (path.isTSTypeAliasDeclaration()) {
-      const id = this.getValidatorIdentifier(alias.id)
-      return templates.alias({
-        T: this.t,
-        ID: id,
-        NAME: t.stringLiteral(id.name),
-        TYPE: await this.convert(path.get('typeAnnotation')),
+      const T = t.identifier(this.context.t.name)
+      if (lastImport)
+        lastImport.insertAfter(templates.importTypedValidators({ T }) as any)
+      else if (program)
+        program.unshiftContainer(
+          'body',
+          templates.importTypedValidators({ T }) as any
+        )
+      return T
+    }
+  )
+
+  async convertExport(name: string): Promise<ConvertedTypeReference> {
+    const ast = await this.parseFile(this.file)
+    let pathToConvert: NodePath<any> | undefined
+    if (name === 'default') {
+      traverse(ast, {
+        ExportDefaultDeclaration: (
+          path: NodePath<t.ExportDefaultDeclaration>
+        ) => {
+          const declaration = path.get('declaration')
+          const node: any = declaration.node
+          if (node) {
+            path.stop()
+            pathToConvert = declaration
+          }
+        },
+        ExportSpecifier: (path: NodePath<t.ExportSpecifier>) => {
+          if (getImportOrExportName(path.node.exported) === 'default') {
+            path.stop()
+            pathToConvert = path.get('exported')
+          }
+        },
+      })
+    } else if (name === '*') {
+      throw new Error('TODO')
+    } else {
+      traverse(ast, {
+        ExportNamedDeclaration: (path: NodePath<t.ExportNamedDeclaration>) => {
+          const declaration = path.get('declaration')
+          const node: any = declaration.node
+          if (node?.id && getImportOrExportName(node.id) === name) {
+            path.stop()
+            pathToConvert = declaration
+          }
+        },
+        ExportSpecifier: (path: NodePath<t.ExportSpecifier>) => {
+          if (getImportOrExportName(path.node.exported) === name) {
+            path.stop()
+            pathToConvert = path.get('exported')
+          }
+        },
       })
     }
-    throw new NodeConversionError(`Unsupported alias node`, this.file, path)
+    if (!pathToConvert)
+      throw new Error(`export ${name} not found in file: ${this.file}`)
+    const result = await this.convertTypeReference(pathToConvert)
+    if (
+      pathToConvert.parentPath.isExportSpecifier() &&
+      result.kind === 'type'
+    ) {
+      if (result.converted.type !== 'Identifier') {
+        throw new NodeConversionError(
+          `need converted export to be an identifier`,
+          this.file,
+          pathToConvert
+        )
+      }
+      pathToConvert.parentPath.parentPath.insertAfter(
+        t.exportNamedDeclaration(null, [
+          t.exportSpecifier(result.converted, result.converted),
+        ])
+      )
+    }
+    return result
+  }
+
+  async convertTypeReference(
+    path: NodePath<any>
+  ): Promise<ConvertedTypeReference> {
+    let converted = this.convertedTypeReferences.get(path.node)
+    if (converted) return converted
+    converted = await this._convertTypeReference(path)
+    this.convertedTypeReferences.set(path.node, converted)
+    return converted
+  }
+
+  private async _convertTypeReference(
+    path: NodePath<any>
+  ): Promise<ConvertedTypeReference> {
+    const type = path.node
+    switch (type.type) {
+      case 'Identifier': {
+        const id = path as NodePath<t.Identifier>
+        const binding = id.scope.getBinding(id.node.name)
+        if (binding) return await this.convertTypeReference(binding.path)
+        if (builtinClasses.has(id.node.name))
+          return { converted: id.node, kind: 'class' }
+        break
+      }
+      case 'ClassDeclaration':
+        return { converted: type.id, kind: 'class' }
+      case 'TypeAlias': {
+        const { id } = type as t.TypeAlias
+        const validatorId = this.getValidatorIdentifier(id)
+        const validator: t.VariableDeclaration = templates.alias({
+          T: await this.importT(),
+          ID: validatorId,
+          NAME: t.stringLiteral(id.name),
+          TYPE: await this.convert(
+            (path as NodePath<t.TypeAlias>).get('right')
+          ),
+        }) as any
+        const { parentPath } = path
+        if (parentPath.isExportNamedDeclaration())
+          parentPath.insertAfter(t.exportNamedDeclaration(validator))
+        else path.insertAfter(validator)
+        return { converted: validatorId, kind: 'type' }
+      }
+      case 'TSTypeAliasDeclaration': {
+        const { id } = type as t.TSTypeAliasDeclaration
+        const validatorId = this.getValidatorIdentifier(id)
+        const validator: t.VariableDeclaration = templates.alias({
+          T: await this.importT(),
+          ID: validatorId,
+          NAME: t.stringLiteral(id.name),
+          TYPE: await this.convert(
+            (path as NodePath<t.TSTypeAliasDeclaration>).get('typeAnnotation')
+          ),
+        }) as any
+        const { parentPath } = path
+        if (parentPath.isExportNamedDeclaration())
+          parentPath.insertAfter(t.exportNamedDeclaration(validator))
+        else path.insertAfter(validator)
+        return { converted: validatorId, kind: 'type' }
+      }
+      case 'ImportDefaultSpecifier':
+      case 'ImportSpecifier': {
+        const specifier = type as t.ImportSpecifier | t.ImportDefaultSpecifier
+        const importDeclaration = path.parentPath as NodePath<
+          t.ImportDeclaration
+        >
+        const { local } = specifier
+        const imported =
+          specifier.type === 'ImportDefaultSpecifier'
+            ? t.identifier('default')
+            : specifier.imported
+        const importKind =
+          (specifier.type === 'ImportSpecifier'
+            ? specifier.importKind
+            : null) ||
+          importDeclaration.node.importKind ||
+          'value'
+        const sourceFile = resolveImportSource(this.file, importDeclaration)
+        const sourceContext = this.context.forFile(sourceFile)
+        const { converted, kind } = await sourceContext.convertExport(
+          getImportOrExportName(imported)
+        )
+        if (
+          converted.type !== 'Identifier' &&
+          converted.type !== 'StringLiteral'
+        ) {
+          throw new NodeConversionError(
+            `expected converted export to be an Identifier or StringLiteral, but got ${converted.type}`,
+            this.file,
+            path
+          )
+        }
+        const id = kind === 'class' ? local : this.getValidatorIdentifier(local)
+        if (importKind === 'type') {
+          const finalPath =
+            path.isImportDefaultSpecifier() && kind !== 'class'
+              ? (path.replaceWith(
+                  t.importSpecifier(specifier.local, t.identifier('default'))
+                )[0] as NodePath<
+                  | t.ImportDefaultSpecifier
+                  | t.ImportSpecifier
+                  | t.ImportNamespaceSpecifier
+                >)
+              : path
+          const finalSpecifier = finalPath.node
+          moveImportKindToSpecifiers(importDeclaration.node)
+          if (kind === 'class') finalSpecifier.importKind = 'value'
+          else finalPath.insertAfter(t.importSpecifier(id, converted))
+        }
+        return { converted: id, kind }
+      }
+    }
+    throw new NodeConversionError(`Unsupported type reference`, this.file, path)
   }
 
   async convert(path: NodePath<any>): Promise<t.Expression> {
@@ -150,26 +360,26 @@ export class FileConversionContext {
       case 'VoidTypeAnnotation':
       case 'TSVoidKeyword':
       case 'TSUndefinedKeyword':
-        return templates.undefined({ T: this.t })
+        return templates.undefined({ T: await this.importT() })
       case 'NullLiteralTypeAnnotation':
       case 'TSNullKeyword':
-        return templates.null({ T: this.t })
+        return templates.null({ T: await this.importT() })
       case 'NumberTypeAnnotation':
       case 'TSNumberKeyword':
-        return templates.number({ T: this.t })
+        return templates.number({ T: await this.importT() })
       case 'StringTypeAnnotation':
       case 'TSStringKeyword':
-        return templates.string({ T: this.t })
+        return templates.string({ T: await this.importT() })
       case 'BooleanTypeAnnotation':
       case 'TSBooleanKeyword':
-        return templates.boolean({ T: this.t })
+        return templates.boolean({ T: await this.importT() })
       case 'SymbolTypeAnnotation':
       case 'TSSymbolKeyword':
-        return templates.symbol({ T: this.t })
+        return templates.symbol({ T: await this.importT() })
       case 'NumberLiteralTypeAnnotation':
         return Object.assign(
           templates.numberLiteral({
-            T: this.t,
+            T: await this.importT(),
             VALUE: t.numericLiteral(type.value),
           }) as t.CallExpression,
           { typeParameters: t.typeParameterInstantiation([type]) }
@@ -177,7 +387,7 @@ export class FileConversionContext {
       case 'StringLiteralTypeAnnotation':
         return Object.assign(
           templates.stringLiteral({
-            T: this.t,
+            T: await this.importT(),
             VALUE: t.stringLiteral(type.value),
           }) as t.CallExpression,
           { typeParameters: t.typeParameterInstantiation([type]) }
@@ -185,7 +395,7 @@ export class FileConversionContext {
       case 'BooleanLiteralTypeAnnotation':
         return Object.assign(
           templates.booleanLiteral({
-            T: this.t,
+            T: await this.importT(),
             VALUE: t.booleanLiteral(type.value),
           }) as t.CallExpression,
           { typeParameters: t.typeParameterInstantiation([type]) }
@@ -194,45 +404,45 @@ export class FileConversionContext {
         switch (type.literal.type) {
           case 'StringLiteral':
             return templates.stringLiteral({
-              T: this.t,
+              T: await this.importT(),
               VALUE: type.literal,
             })
           case 'NumericLiteral':
             return templates.numberLiteral({
-              T: this.t,
+              T: await this.importT(),
               VALUE: type.literal,
             })
           case 'BooleanLiteral':
             return templates.booleanLiteral({
-              T: this.t,
+              T: await this.importT(),
               VALUE: type.literal,
             })
         }
         break
       case 'NullableTypeAnnotation':
         return templates.nullishOr({
-          T: this.t,
+          T: await this.importT(),
           TYPE: await this.convert(
             (path as NodePath<t.NullableTypeAnnotation>).get('typeAnnotation')
           ),
         })
       case 'ArrayTypeAnnotation':
         return templates.array({
-          T: this.t,
+          T: await this.importT(),
           TYPE: await this.convert(
             (path as NodePath<t.ArrayTypeAnnotation>).get('elementType')
           ),
         })
       case 'TSArrayType':
         return templates.array({
-          T: this.t,
+          T: await this.importT(),
           TYPE: await this.convert(
             (path as NodePath<t.TSArrayType>).get('elementType')
           ),
         })
       case 'TupleTypeAnnotation':
         return templates.tuple({
-          T: this.t,
+          T: await this.importT(),
           TYPES: await Promise.all(
             (path as NodePath<t.TupleTypeAnnotation>)
               .get('types')
@@ -241,7 +451,7 @@ export class FileConversionContext {
         })
       case 'TSTupleType':
         return templates.tuple({
-          T: this.t,
+          T: await this.importT(),
           TYPES: await Promise.all(
             (path as NodePath<t.TSTupleType>)
               .get('elementTypes')
@@ -254,7 +464,7 @@ export class FileConversionContext {
         )
       case 'UnionTypeAnnotation':
         return templates.oneOf({
-          T: this.t,
+          T: await this.importT(),
           TYPES: await Promise.all(
             (path as NodePath<t.UnionTypeAnnotation>)
               .get('types')
@@ -263,7 +473,7 @@ export class FileConversionContext {
         })
       case 'TSUnionType':
         return templates.oneOf({
-          T: this.t,
+          T: await this.importT(),
           TYPES: await Promise.all(
             (path as NodePath<t.TSUnionType>)
               .get('types')
@@ -272,7 +482,7 @@ export class FileConversionContext {
         })
       case 'IntersectionTypeAnnotation':
         return templates.allOf({
-          T: this.t,
+          T: await this.importT(),
           TYPES: await Promise.all(
             (path as NodePath<t.IntersectionTypeAnnotation>)
               .get('types')
@@ -281,7 +491,7 @@ export class FileConversionContext {
         })
       case 'TSIntersectionType':
         return templates.allOf({
-          T: this.t,
+          T: await this.importT(),
           TYPES: await Promise.all(
             (path as NodePath<t.TSIntersectionType>)
               .get('types')
@@ -303,182 +513,48 @@ export class FileConversionContext {
           this,
           path as NodePath<t.TSTypeReference>
         )
-      case 'GenericTypeAnnotation':
-        return await convertGenericTypeAnnotation(
-          this,
-          path as NodePath<t.GenericTypeAnnotation>
+
+      case 'GenericTypeAnnotation': {
+        const { converted, kind } = await this.convertTypeReference(
+          (path as NodePath<t.GenericTypeAnnotation>).get('id')
         )
+        return kind === 'class'
+          ? templates.instanceOf({ T: await this.importT(), CLASS: converted })
+          : templates.ref({ T: await this.importT(), TYPE: converted })
+      }
+      case 'TypeCastExpression': {
+        const reifiedType = getReifiedType(
+          path as NodePath<t.TypeCastExpression>
+        )
+        if (reifiedType) {
+          const id = reifiedType.isGenericTypeAnnotation()
+            ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
+            : null
+          let converted
+          if (id?.isIdentifier()) {
+            id.scope.path.traverse(TSBindingVisitors)
+            const binding = id.scope.getBinding(id.node.name)
+            if (binding && binding.path.isTypeAlias()) {
+              converted = await this.convert(
+                (binding.path as NodePath<t.TypeAlias>).get('right')
+              )
+            }
+          }
+          if (!converted) converted = await this.convert(reifiedType)
+          if (
+            id?.isIdentifier() &&
+            converted.type === 'Identifier' &&
+            id.node.name === converted.name
+          ) {
+            path.remove()
+          } else {
+            path.replaceWith(converted)
+          }
+          return converted
+        }
+        break
+      }
     }
     throw new NodeConversionError(`Unsupported type`, this.file, path)
-  }
-
-  resolveImportSource(
-    file: string,
-    declaration:
-      | NodePath<t.ImportDeclaration>
-      | NodePath<t.ExportNamedDeclaration>
-  ): string {
-    const source = declaration.node.source?.value
-    if (!source) {
-      throw new Error(`expected node to have source`)
-    }
-    if (!source.startsWith('.')) {
-      throw new NodeConversionError(
-        `References to types or classes imported from dependencies are not currently supported`,
-        file,
-        declaration
-      )
-    }
-    return Path.resolve(Path.dirname(file), source)
-  }
-
-  async lookupBinding(
-    file: string,
-    identifier:
-      | NodePath<t.Identifier>
-      | NodePath<t.QualifiedTypeIdentifier>
-      | NodePath<t.Identifier | t.QualifiedTypeIdentifier>
-      | NodePath<t.TSQualifiedName>
-      | NodePath<t.TSEntityName>
-  ): Promise<FileNodePath | null> {
-    identifier.scope.path.traverse(TSBindingVisitors)
-    if (identifier.isIdentifier()) {
-      const binding = identifier.scope.getBinding(identifier.node.name)
-      if (!binding) return null
-      if (
-        binding.path.isImportSpecifier() ||
-        binding.path.isImportDefaultSpecifier() ||
-        binding.path.isImportNamespaceSpecifier()
-      ) {
-        const importDeclaration = binding.path.parentPath as NodePath<
-          t.ImportDeclaration
-        >
-
-        const importedFile = this.resolveImportSource(file, importDeclaration)
-        if (binding.path.isImportDefaultSpecifier()) {
-          return await this.lookupExport(importedFile, 'default')
-        }
-        if (binding.path.isImportNamespaceSpecifier()) {
-          return await this.lookupExport(importedFile, '*')
-        }
-        if (binding.path.isImportSpecifier()) {
-          const imported = getImportOrExportName(
-            (binding.path as NodePath<t.ImportSpecifier>).node.imported
-          )
-          return await this.lookupExport(importedFile, imported)
-        }
-      } else {
-        this.onTypeReference({ file, path: binding.path })
-        return { file, path: binding.path }
-      }
-    } else if (identifier.isTSQualifiedName()) {
-      const binding = await this.lookupBinding(
-        file,
-        (identifier as NodePath<t.TSQualifiedName>).get('left')
-      )
-      if (!binding) {
-        // TODO
-        return null
-      }
-      if (binding.path.isProgram()) {
-        return await this.lookupExport(
-          binding.file,
-          identifier.node.right.name,
-          binding.path.node
-        )
-      }
-    } else if (identifier.isQualifiedTypeIdentifier()) {
-      const binding = await this.lookupBinding(
-        file,
-        (identifier as NodePath<t.QualifiedTypeIdentifier>).get('qualification')
-      )
-      if (!binding) {
-        // TODO
-        return null
-      }
-      if (binding.path.isProgram()) {
-        return await this.lookupExport(
-          binding.file,
-          identifier.node.id.name,
-          binding.path.node
-        )
-      }
-    }
-    return null
-  }
-
-  async lookupExport(
-    file: string,
-    exported: string,
-    _ast?: t.File
-  ): Promise<FileNodePath | null> {
-    const ast = _ast || (await this.parseFile(file))
-    if (!_ast) traverse(ast, TSBindingVisitors)
-
-    let getResult: undefined | (() => Promise<FileNodePath | null>)
-    if (exported === '*') {
-      traverse(ast, {
-        Program: (path: NodePath<t.Program>) => {
-          path.stop()
-          getResult = async (): Promise<FileNodePath | null> => ({ file, path })
-        },
-      })
-    }
-    if (exported === 'default') {
-      traverse(ast, {
-        ExportDefaultDeclaration: (
-          path: NodePath<t.ExportDefaultDeclaration>
-        ) => {
-          const declaration = path.get('declaration')
-          path.stop()
-          getResult = async (): Promise<FileNodePath | null> => {
-            if (declaration.isIdentifier()) {
-              return await this.lookupBinding(file, declaration)
-            } else {
-              this.onTypeReference({ file, path: declaration })
-              return { file, path: declaration }
-            }
-          }
-        },
-        ExportSpecifier: (path: NodePath<t.ExportSpecifier>) => {
-          if (getImportOrExportName(path.node.exported) !== 'default') {
-            path.skip()
-            return
-          }
-          const parent = path.parentPath as NodePath<t.ExportNamedDeclaration>
-          if (parent.node.source) {
-            throw new Error(`export from not currently supported`)
-          }
-          path.stop()
-          getResult = async (): Promise<FileNodePath | null> =>
-            this.lookupBinding(file, path.get('local'))
-        },
-      })
-    } else {
-      traverse(ast, {
-        ExportNamedDeclaration: (path: NodePath<t.ExportNamedDeclaration>) => {
-          if (path.node.source) {
-            throw new Error(`export from not currently supported`)
-          }
-          const declaration = path.get('declaration')
-          const node = declaration.node as any
-          if (
-            (node?.id?.type === 'Identifier' && node?.id?.name === exported) ||
-            (node?.id?.value === 'StringLiteral' &&
-              node?.id?.value === exported)
-          ) {
-            path.stop()
-            getResult = async (): Promise<FileNodePath | null> => {
-              this.onTypeReference({ file, path: declaration })
-              return { file, path: declaration }
-            }
-          }
-        },
-      })
-    }
-    if (!getResult) {
-      throw new Error(`Unable to get binding for export ${exported} in ${file}`)
-    }
-    return await getResult()
   }
 }

@@ -47,7 +47,7 @@ export default async function convertTSTypeLiteral(
   }
   if (!optional.length) {
     return templates.object({
-      T: context.t,
+      T: await context.importT(),
       PROPS: t.objectExpression(required),
     })
   }
@@ -63,7 +63,7 @@ export default async function convertTSTypeLiteral(
     )
   }
   return templates.object({
-    T: context.t,
+    T: await context.importT(),
     PROPS: t.objectExpression(props),
   })
 }

@@ -8,5 +8,7 @@ export default function normalizeTS(
 ): string {
   if (_node instanceof NodePath) return normalizeTS(_node.node)
   const node = typeof _node === 'string' ? _node : generate(_node).code
-  return prettier.format(node, { parser: 'typescript' })
+  return prettier
+    .format(node, { parser: 'typescript' })
+    .replace(/\n{2,}/gm, '\n')
 }

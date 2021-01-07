@@ -72,19 +72,19 @@ export default async function convertTSTypeReference(
         path
       )
     return templates.record({
-      T: context.t,
+      T: await context.importT(),
       KEY: await context.convert(key),
       VALUE: await context.convert(value),
     })
   }
   if (await context.isClass(path)) {
     return templates.instanceOf({
-      T: context.t,
+      T: await context.importT(),
       CLASS: convertClassReference(typeName),
     })
   } else {
     return templates.ref({
-      T: context.t,
+      T: await context.importT(),
       TYPE: convertTypeAliasReference(context, typeName),
     })
   }

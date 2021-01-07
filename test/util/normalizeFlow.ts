@@ -10,5 +10,7 @@ export default function normalizeFlow(
     return normalizeFlow(_node.node)
   }
   const node = typeof _node === 'string' ? _node : generate(_node).code
-  return prettier.format(node, { parser: 'babel-flow' })
+  return prettier
+    .format(node, { parser: 'babel-flow' })
+    .replace(/\n{2,}/gm, '\n')
 }

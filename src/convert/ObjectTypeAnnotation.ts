@@ -20,7 +20,7 @@ export default async function convertObjectTypeAnnotation(
   if (properties.length === 0 && indexers?.length === 1) {
     const [indexer] = indexers
     return templates.record({
-      T: context.t,
+      T: await context.importT(),
       KEY: await context.convert(indexer.get('key')),
       VALUE: await context.convert(indexer.get('value')),
     })
@@ -59,7 +59,7 @@ export default async function convertObjectTypeAnnotation(
   }
   if (exact && !optional.length) {
     return templates.object({
-      T: context.t,
+      T: await context.importT(),
       PROPS: t.objectExpression(required),
     })
   }
@@ -78,7 +78,7 @@ export default async function convertObjectTypeAnnotation(
     )
   }
   return templates.object({
-    T: context.t,
+    T: await context.importT(),
     PROPS: t.objectExpression(props),
   })
 }
