@@ -386,6 +386,44 @@ describe(`convertFlowType`, function() {
       }
     )
   })
+  it.only(`converts default type import that's indirectly exported`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import type Foob from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          type Foo = {|
+            foo: number
+          |}
+          export type {Foo as default}
+        `,
+      },
+      {
+        '/a': `
+          import {type default as Foob, defaultType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          type Foo = {|
+            foo: number
+          |}
+          const FooType = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+          export type {Foo as default}
+          export {FooType as defaultType}
+        `,
+      }
+    )
+  })
   it(`converts default class import`, async function() {
     await integrationTest(
       {

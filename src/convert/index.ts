@@ -193,7 +193,7 @@ export class FileConversionContext {
         ExportSpecifier: (path: NodePath<t.ExportSpecifier>) => {
           if (getImportOrExportName(path.node.exported) === 'default') {
             path.stop()
-            pathToConvert = path.get('exported')
+            pathToConvert = path.get('local')
           }
         },
       })
@@ -224,6 +224,8 @@ export class FileConversionContext {
       pathToConvert.parentPath.isExportSpecifier() &&
       result.kind === 'type'
     ) {
+      const exportTypeSpecifier = pathToConvert.parentPath
+        .node as t.ExportSpecifier
       if (result.converted.type !== 'Identifier') {
         throw new NodeConversionError(
           `need converted export to be an identifier`,
@@ -231,11 +233,17 @@ export class FileConversionContext {
           pathToConvert
         )
       }
+      const exported =
+        getImportOrExportName(exportTypeSpecifier.exported) === 'default'
+          ? this.getValidatorIdentifier('default')
+          : result.converted
       pathToConvert.parentPath.parentPath.insertAfter(
         t.exportNamedDeclaration(null, [
-          t.exportSpecifier(result.converted, result.converted),
+          t.exportSpecifier(result.converted, exported),
         ])
       )
+      if (getImportOrExportName(exportTypeSpecifier.exported) === 'default')
+        return { converted: exported, kind: result.kind }
     }
     return result
   }
