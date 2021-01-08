@@ -344,14 +344,22 @@ export class FileConversionContext {
       case 'TypeAlias': {
         const { id } = type as t.TypeAlias
         const validatorId = this.getValidatorIdentifier(id)
+        const T = await this.importT()
         const validator: t.VariableDeclaration = templates.alias({
-          T: await this.importT(),
+          T,
           ID: validatorId,
           NAME: t.stringLiteral(id.name),
           TYPE: await this.convert(
             (path as NodePath<t.TypeAlias>).get('right')
           ),
         }) as any
+        ;(validator.declarations[0]
+          .id as any).typeAnnotation = t.typeAnnotation(
+          t.genericTypeAnnotation(
+            t.qualifiedTypeIdentifier(t.identifier('Type'), T),
+            t.typeParameterInstantiation([t.genericTypeAnnotation(id)])
+          )
+        )
         const { parentPath } = path
         if (parentPath.isExportNamedDeclaration())
           parentPath.insertAfter(t.exportNamedDeclaration(validator))
@@ -361,14 +369,22 @@ export class FileConversionContext {
       case 'TSTypeAliasDeclaration': {
         const { id } = type as t.TSTypeAliasDeclaration
         const validatorId = this.getValidatorIdentifier(id)
+        const T = await this.importT()
         const validator: t.VariableDeclaration = templates.alias({
-          T: await this.importT(),
+          T,
           ID: validatorId,
           NAME: t.stringLiteral(id.name),
           TYPE: await this.convert(
             (path as NodePath<t.TSTypeAliasDeclaration>).get('typeAnnotation')
           ),
         }) as any
+        ;(validator.declarations[0]
+          .id as any).typeAnnotation = t.tsTypeAnnotation(
+          t.tsTypeReference(
+            t.tsQualifiedName(T, t.identifier('Type')),
+            t.tsTypeParameterInstantiation([t.tsTypeReference(id)])
+          )
+        )
         const { parentPath } = path
         if (parentPath.isExportNamedDeclaration())
           parentPath.insertAfter(t.exportNamedDeclaration(validator))

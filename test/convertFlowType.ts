@@ -181,7 +181,7 @@ describe(`convertFlowType`, function() {
           type Foo = {|
             foo: number,
           |}
-          const FooType = t.alias(
+          const FooType: t.Type<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -273,7 +273,7 @@ describe(`convertFlowType`, function() {
           export type Foo = {|
             foo: number
           |}
-          export const FooType = t.alias(
+          export const FooType: t.Type<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -309,7 +309,7 @@ describe(`convertFlowType`, function() {
           type Foo = {|
             foo: number
           |}
-          const FooType = t.alias(
+          const FooType: t.Type<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -421,7 +421,7 @@ describe(`convertFlowType`, function() {
           type Foo = {|
             foo: number
           |}
-          const FooType = t.alias(
+          const FooType: t.Type<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
