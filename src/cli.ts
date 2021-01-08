@@ -56,7 +56,7 @@ async function go() {
   }
   for (const [file, ast] of context.fileASTs.entries()) {
     const prettierOptions = {
-      parser: /\.tsx?$/.test(file) ? 'typescript' : 'babel',
+      parser: /\.tsx?$/.test(file) ? 'typescript' : 'babel-flow',
     }
     const printed = prettier.format(recast.print(ast).code, prettierOptions)
     const orig = prettier.format(

@@ -15,11 +15,14 @@ import moveImportKindToSpecifiers from './moveImportKindToSpecifiers'
 import areReferencesEqual from './areReferencesEqual'
 import getKey from './getKey'
 import convertUtilityFlowType from './convertUtilityFlowType'
+import moveLeadingCommentsToNextSibling from './moveCommentsToNextSibling'
 
 const templates = {
   importTypedValidators: template.statement`import * as T from 'typed-validators'`,
+  importValidation: template.statement`import { Validation as LOCAL } from 'typed-validators'`,
   undefined: template.expression`T.undefined()`,
   any: template.expression`T.any()`,
+  unknown: template.expression`T.unknown()`,
   null: template.expression`T.null()`,
   number: template.expression`T.number()`,
   numberLiteral: template.expression`T.number(VALUE)`,
@@ -144,9 +147,6 @@ export class FileConversionContext {
       | NodePath<t.TSAsExpression>
     )[] = []
     traverse(ast, {
-      ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
-        if (path.node.source.value === 'flow-runtime') path.remove()
-      },
       TypeCastExpression: (path: NodePath<t.TypeCastExpression>) => {
         if (getReifiedType(path)) {
           reifyCalls.push(path)
@@ -161,41 +161,74 @@ export class FileConversionContext {
       },
     })
     for (const path of reifyCalls) {
-      const reifiedType = getReifiedType(path)
-      if (reifiedType) {
-        const id = reifiedType.isGenericTypeAnnotation()
-          ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
-          : reifiedType.isTSTypeReference()
-          ? (reifiedType as NodePath<t.TSTypeReference>).get('typeName')
-          : null
-        let converted
-        if (id?.isIdentifier()) {
-          id.scope.path.traverse(TSBindingVisitors)
-          const binding = id.scope.getBinding(id.node.name)
-          if (binding && binding.path.isTypeAlias()) {
-            converted = await this.convert(
-              (binding.path as NodePath<t.TypeAlias>).get('right')
-            )
-          } else if (binding && binding.path.isTSTypeAliasDeclaration()) {
-            converted = await this.convert(
-              (binding.path as NodePath<t.TSTypeAliasDeclaration>).get(
-                'typeAnnotation'
+      await this.replaceReifyCall(path)
+    }
+    traverse(ast, {
+      ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
+        if (path.node.source.value === 'flow-runtime') {
+          const validationImport = path.node.specifiers
+            ? path.node.specifiers.find(
+                s =>
+                  s.type === 'ImportSpecifier' &&
+                  s.imported.type === 'Identifier' &&
+                  s.imported.name === 'Validation'
               )
-            )
+            : null
+          if (validationImport) {
+            const newValidationImport = templates.importValidation({
+              LOCAL: validationImport.local,
+            }) as any
+
+            newValidationImport.importKind =
+              (validationImport.type === 'ImportSpecifier'
+                ? validationImport.importKind
+                : null) || path.node.importKind
+            path.insertAfter(newValidationImport)
+          }
+          moveLeadingCommentsToNextSibling(path)
+          path.remove()
+        }
+      },
+    })
+  }
+
+  async replaceReifyCall(
+    path: NodePath<t.TypeCastExpression> | NodePath<t.TSAsExpression>
+  ): Promise<void> {
+    const reifiedType = getReifiedType(path)
+    if (!reifiedType) return
+    if (reifiedType.isGenericTypeAnnotation()) {
+      const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
+      const convertedUtility = await convertUtilityFlowType(this, genType)
+      if (convertedUtility) {
+        path.replaceWith(convertedUtility)
+        return
+      }
+      try {
+        const { converted, kind } = await this.convertTypeReference(
+          genType.get('id')
+        )
+        if (kind === 'class') {
+          path.replaceWith(
+            await this.convertTypeReferenceToValidator({ converted, kind })
+          )
+          return
+        }
+        const { parentPath } = path
+        if (parentPath.isVariableDeclarator()) {
+          const { id } = parentPath.node as t.VariableDeclarator
+          if (id.type === 'Identifier' && areReferencesEqual(converted, id)) {
+            parentPath.remove()
+            return
           }
         }
-        const finalConverted = converted || (await this.convert(reifiedType))
-        if (
-          id?.isIdentifier() &&
-          finalConverted.type === 'Identifier' &&
-          id.node.name === finalConverted.name
-        ) {
-          path.remove()
-        } else {
-          path.replaceWith(finalConverted)
-        }
+        path.replaceWith(converted)
+        return
+      } catch (error) {
+        // ignore
       }
     }
+    path.replaceWith(await this.convert(reifiedType))
   }
 
   importT = once(
@@ -343,23 +376,24 @@ export class FileConversionContext {
         return { converted: type.id, kind: 'class' }
       case 'TypeAlias': {
         const { id } = type as t.TypeAlias
-        const validatorId = this.getValidatorIdentifier(id)
         const T = await this.importT()
-        const validator: t.VariableDeclaration = templates.alias({
-          T,
-          ID: validatorId,
-          NAME: t.stringLiteral(id.name),
-          TYPE: await this.convert(
-            (path as NodePath<t.TypeAlias>).get('right')
-          ),
-        }) as any
-        ;(validator.declarations[0]
-          .id as any).typeAnnotation = t.typeAnnotation(
+        const validatorId = this.getValidatorIdentifier(id)
+        const validatorIdWithType = this.getValidatorIdentifier(id)
+        validatorIdWithType.typeAnnotation = t.typeAnnotation(
           t.genericTypeAnnotation(
             t.qualifiedTypeIdentifier(t.identifier('Type'), T),
             t.typeParameterInstantiation([t.genericTypeAnnotation(id)])
           )
         )
+        const validator: t.VariableDeclaration = templates.alias({
+          T,
+          ID: validatorIdWithType,
+          NAME: t.stringLiteral(id.name),
+          TYPE: await this.convert(
+            (path as NodePath<t.TypeAlias>).get('right')
+          ),
+        }) as any
+
         const { parentPath } = path
         if (parentPath.isExportNamedDeclaration())
           parentPath.insertAfter(t.exportNamedDeclaration(validator))
@@ -368,23 +402,24 @@ export class FileConversionContext {
       }
       case 'TSTypeAliasDeclaration': {
         const { id } = type as t.TSTypeAliasDeclaration
-        const validatorId = this.getValidatorIdentifier(id)
         const T = await this.importT()
-        const validator: t.VariableDeclaration = templates.alias({
-          T,
-          ID: validatorId,
-          NAME: t.stringLiteral(id.name),
-          TYPE: await this.convert(
-            (path as NodePath<t.TSTypeAliasDeclaration>).get('typeAnnotation')
-          ),
-        }) as any
-        ;(validator.declarations[0]
-          .id as any).typeAnnotation = t.tsTypeAnnotation(
+        const validatorId = this.getValidatorIdentifier(id)
+        const validatorIdWithType = this.getValidatorIdentifier(id)
+        validatorIdWithType.typeAnnotation = t.tsTypeAnnotation(
           t.tsTypeReference(
             t.tsQualifiedName(T, t.identifier('Type')),
             t.tsTypeParameterInstantiation([t.tsTypeReference(id)])
           )
         )
+
+        const validator: t.VariableDeclaration = templates.alias({
+          T,
+          ID: validatorIdWithType,
+          NAME: t.stringLiteral(id.name),
+          TYPE: await this.convert(
+            (path as NodePath<t.TSTypeAliasDeclaration>).get('typeAnnotation')
+          ),
+        }) as any
         const { parentPath } = path
         if (parentPath.isExportNamedDeclaration())
           parentPath.insertAfter(t.exportNamedDeclaration(validator))
@@ -470,10 +505,10 @@ export class FileConversionContext {
     throw new NodeConversionError(`Unsupported type reference`, this.file, path)
   }
 
-  async convertTypeReferenceToValidator(
-    path: NodePath<any>
-  ): Promise<t.Expression> {
-    const { converted, kind } = await this.convertTypeReference(path)
+  async convertTypeReferenceToValidator({
+    converted,
+    kind,
+  }: ConvertedTypeReference): Promise<t.Expression> {
     return kind === 'class'
       ? templates.instanceOf({ T: await this.importT(), CLASS: converted })
       : kind === 'alias'
@@ -485,8 +520,9 @@ export class FileConversionContext {
     const type = path.node
     switch (type.type) {
       case 'MixedTypeAnnotation':
-      case 'AnyTypeAnnotation':
       case 'TSUnknownKeyword':
+        return templates.unknown({ T: await this.importT() })
+      case 'AnyTypeAnnotation':
       case 'TSAnyKeyword':
         return templates.any({ T: await this.importT() })
       case 'VoidTypeAnnotation':
@@ -644,13 +680,17 @@ export class FileConversionContext {
         const convertedUtility = await convertUtilityFlowType(this, path)
         if (convertedUtility) return convertedUtility
         return await this.convertTypeReferenceToValidator(
-          (path as NodePath<t.GenericTypeAnnotation>).get('id')
+          await this.convertTypeReference(
+            (path as NodePath<t.GenericTypeAnnotation>).get('id')
+          )
         )
       }
       case 'TSTypeReference': {
         if (isTSRecordType(path)) return await convertTSRecordType(this, path)
         return await this.convertTypeReferenceToValidator(
-          (path as NodePath<t.TSTypeReference>).get('typeName')
+          await this.convertTypeReference(
+            (path as NodePath<t.TSTypeReference>).get('typeName')
+          )
         )
       }
     }
