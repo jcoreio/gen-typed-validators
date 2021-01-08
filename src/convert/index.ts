@@ -102,7 +102,6 @@ export class ConversionContext {
 export class FileConversionContext {
   public readonly context: ConversionContext
   public readonly file: string
-  private importTResult: Promise<t.Identifier> | undefined
   private convertedTypeReferences: Map<
     t.Node,
     ConvertedTypeReference

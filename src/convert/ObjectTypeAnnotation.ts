@@ -7,6 +7,8 @@ import { NodePath } from '@babel/traverse'
 const templates = {
   record: template.expression`T.record(KEY, VALUE)`,
   object: template.expression`T.object(PROPS)`,
+  merge: template.expression(`%%T%%.merge(%%OBJECTS%%)`),
+  mergeInexact: template.expression(`%%T%%.mergeInexact(%%OBJECTS%%)`),
 }
 
 export default async function convertObjectTypeAnnotation(
@@ -14,7 +16,12 @@ export default async function convertObjectTypeAnnotation(
   path: NodePath<t.ObjectTypeAnnotation>
 ): Promise<t.Expression> {
   const obj = path.node
-  const properties = path.get('properties')
+  const properties: NodePath<t.ObjectTypeProperty>[] = []
+  const spreads: NodePath<t.ObjectTypeSpreadProperty>[] = []
+  for (const prop of path.get('properties')) {
+    if (prop.isObjectTypeProperty()) properties.push(prop)
+    if (prop.isObjectTypeSpreadProperty()) spreads.push(prop)
+  }
   const indexers = path.get('indexers') as NodePath<t.ObjectTypeIndexer>[]
   const exact = !obj.exact && !obj.inexact ? context.defaultExact : obj.exact
   if (properties.length === 0 && indexers?.length === 1) {
@@ -42,43 +49,53 @@ export default async function convertObjectTypeAnnotation(
   }
   const required: t.ObjectProperty[] = []
   const optional: t.ObjectProperty[] = []
-  for (const _property of properties) {
-    if (!_property.isObjectTypeProperty()) {
-      throw new NodeConversionError(
-        `Unsupported object property`,
-        context.file,
-        _property
-      )
-    }
-    const property: NodePath<t.ObjectTypeProperty> = _property
+  for (const property of properties) {
     const { key, optional: isOptional } = property.node
     const value = property.get('value')
     const converted = t.objectProperty(key, await context.convert(value))
     if (isOptional) optional.push(converted)
     else required.push(converted)
   }
+  const convertedSpreads = spreads.length
+    ? await Promise.all(
+        spreads.map(spread => context.convert(spread.get('argument')))
+      )
+    : []
+  let result: t.Expression
   if (exact && !optional.length) {
-    return templates.object({
+    result = templates.object({
       T: await context.importT(),
       PROPS: t.objectExpression(required),
     })
+  } else {
+    const props: t.ObjectProperty[] = []
+    if (!exact) {
+      props.push(
+        t.objectProperty(t.identifier('exact'), t.booleanLiteral(false))
+      )
+    }
+    if (required.length) {
+      props.push(
+        t.objectProperty(t.identifier('required'), t.objectExpression(required))
+      )
+    }
+    if (optional.length) {
+      props.push(
+        t.objectProperty(t.identifier('optional'), t.objectExpression(optional))
+      )
+    }
+    result = templates.object({
+      T: await context.importT(),
+      PROPS: t.objectExpression(props),
+    })
   }
-  const props: t.ObjectProperty[] = []
-  if (!exact) {
-    props.push(t.objectProperty(t.identifier('exact'), t.booleanLiteral(false)))
+  if (convertedSpreads.length) {
+    return (exact ? templates.merge : templates.mergeInexact)({
+      T: await context.importT(),
+      OBJECTS: properties.length
+        ? [...convertedSpreads, result]
+        : convertedSpreads,
+    })
   }
-  if (required.length) {
-    props.push(
-      t.objectProperty(t.identifier('required'), t.objectExpression(required))
-    )
-  }
-  if (optional.length) {
-    props.push(
-      t.objectProperty(t.identifier('optional'), t.objectExpression(optional))
-    )
-  }
-  return templates.object({
-    T: await context.importT(),
-    PROPS: t.objectExpression(props),
-  })
+  return result
 }

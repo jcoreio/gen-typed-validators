@@ -156,7 +156,6 @@ describe(`convertFlowType`, function() {
   )
 
   testError('() => number', /Unsupported type/)
-  testError('{foo: number, ...bar}', /Unsupported object property/)
   testError(
     '{foo: number, [number]: string}',
     /Properties mixed with indexers aren't supported/
@@ -166,15 +165,14 @@ describe(`convertFlowType`, function() {
     /Multiple indexers aren't supported/
   )
 
-  it(`converts locally reified type alias`, async function() {
+  it(`converts locally reified type aliases`, async function() {
     await integrationTest(
       {
         '/a': `
           import {reify, type Type} from 'flow-runtime'
-          type Foo = {|
-            foo: number
-          |}
-          const FooType = (reify: Type<Foo>)
+          type Foo = {| foo: number |}
+          type Bar = {| ...Foo, bar: string |}
+          const BarType = (reify: Type<Bar>)
         `,
       },
       {
@@ -183,9 +181,19 @@ describe(`convertFlowType`, function() {
           type Foo = {|
             foo: number,
           |}
-          const FooType = t.object({
-            foo: t.number(),
-          })
+          const FooType = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+          type Bar = {| ...Foo, bar: string |}
+          const BarType = t.merge(
+            t.ref(() => FooType),
+            t.object({
+              bar: t.string()
+            })
+          )
         `,
       }
     )
