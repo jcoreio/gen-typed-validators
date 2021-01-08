@@ -159,7 +159,7 @@ describe(`convertTSType`, function() {
           type Foo = {
             foo: number,
           }
-          const FooType: t.Type<Foo> = t.alias(
+          const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -240,7 +240,7 @@ describe(`convertTSType`, function() {
           export type Foo = {
             foo: number
           }
-          export const FooType: t.Type<Foo> = t.alias(
+          export const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -275,7 +275,7 @@ describe(`convertTSType`, function() {
           type Foo = {
             foo: number
           }
-          const FooType: t.Type<Foo> = t.alias(
+          const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -360,7 +360,7 @@ describe(`convertTSType`, function() {
           type Foo = {
             foo: number
           }
-          const FooType: t.Type<Foo> = t.alias(
+          const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),

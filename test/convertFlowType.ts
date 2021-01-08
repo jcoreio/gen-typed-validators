@@ -182,7 +182,7 @@ describe(`convertFlowType`, function() {
           type Foo = {|
             foo: number,
           |}
-          const FooType: t.Type<Foo> = t.alias(
+          const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -191,14 +191,14 @@ describe(`convertFlowType`, function() {
           type Baz = {|
             baz: number,
           |}
-          const BazType: t.Type<Baz> = t.alias(
+          const BazType: t.TypeAlias<Baz> = t.alias(
             'Baz',
             t.object({
               baz: t.number(),
             })
           )
           type Bar = {| ...$Exact<Foo>, ...Baz, bar: string |}
-          const BarType: t.Type<Bar> = t.alias(
+          const BarType: t.TypeAlias<Bar> = t.alias(
             'Bar',
             t.merge(
               t.ref(() => FooType),
@@ -287,7 +287,7 @@ describe(`convertFlowType`, function() {
           export type Foo = {|
             foo: number
           |}
-          export const FooType: t.Type<Foo> = t.alias(
+          export const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -323,7 +323,7 @@ describe(`convertFlowType`, function() {
           type Foo = {|
             foo: number
           |}
-          const FooType: t.Type<Foo> = t.alias(
+          const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),
@@ -435,7 +435,7 @@ describe(`convertFlowType`, function() {
           type Foo = {|
             foo: number
           |}
-          const FooType: t.Type<Foo> = t.alias(
+          const FooType: t.TypeAlias<Foo> = t.alias(
             'Foo',
             t.object({
               foo: t.number(),

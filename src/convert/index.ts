@@ -385,7 +385,7 @@ export class FileConversionContext {
         const validatorIdWithType = this.getValidatorIdentifier(id)
         validatorIdWithType.typeAnnotation = t.typeAnnotation(
           t.genericTypeAnnotation(
-            t.qualifiedTypeIdentifier(t.identifier('Type'), T),
+            t.qualifiedTypeIdentifier(t.identifier('TypeAlias'), T),
             t.typeParameterInstantiation([t.genericTypeAnnotation(id)])
           )
         )
@@ -411,7 +411,7 @@ export class FileConversionContext {
         const validatorIdWithType = this.getValidatorIdentifier(id)
         validatorIdWithType.typeAnnotation = t.tsTypeAnnotation(
           t.tsTypeReference(
-            t.tsQualifiedName(T, t.identifier('Type')),
+            t.tsQualifiedName(T, t.identifier('TypeAlias')),
             t.tsTypeParameterInstantiation([t.tsTypeReference(id)])
           )
         )
