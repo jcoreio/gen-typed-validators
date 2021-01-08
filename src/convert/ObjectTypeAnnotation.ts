@@ -3,6 +3,7 @@ import template from '@babel/template'
 import { FileConversionContext } from './index'
 import NodeConversionError from '../NodeConversionError'
 import { NodePath } from '@babel/traverse'
+import getExactArgument from './getExactArgument'
 
 const templates = {
   record: template.expression`T.record(KEY, VALUE)`,
@@ -58,7 +59,12 @@ export default async function convertObjectTypeAnnotation(
   }
   const convertedSpreads = spreads.length
     ? await Promise.all(
-        spreads.map(spread => context.convert(spread.get('argument')))
+        spreads.map((spread: NodePath<t.ObjectTypeSpreadProperty>) =>
+          context.convert(
+            getExactArgument(context, spread.get('argument')) ||
+              spread.get('argument')
+          )
+        )
       )
     : []
   let result: t.Expression

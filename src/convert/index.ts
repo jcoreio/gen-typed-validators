@@ -204,25 +204,29 @@ export class FileConversionContext {
         path.replaceWith(convertedUtility)
         return
       }
+    }
+    if (
+      reifiedType.isGenericTypeAnnotation() ||
+      reifiedType.isTSTypeReference()
+    ) {
       try {
         const { converted, kind } = await this.convertTypeReference(
-          genType.get('id')
+          reifiedType.isGenericTypeAnnotation()
+            ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
+            : (reifiedType as NodePath<t.TSTypeReference>).get('typeName')
         )
-        if (kind === 'class') {
-          path.replaceWith(
-            await this.convertTypeReferenceToValidator({ converted, kind })
-          )
-          return
-        }
+
         const { parentPath } = path
-        if (parentPath.isVariableDeclarator()) {
+        if (kind !== 'class' && parentPath.isVariableDeclarator()) {
           const { id } = parentPath.node as t.VariableDeclarator
           if (id.type === 'Identifier' && areReferencesEqual(converted, id)) {
             parentPath.remove()
             return
           }
         }
-        path.replaceWith(converted)
+        path.replaceWith(
+          await this.convertTypeReferenceToValidator({ converted, kind })
+        )
         return
       } catch (error) {
         // ignore

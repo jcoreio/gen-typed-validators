@@ -159,9 +159,12 @@ describe(`convertTSType`, function() {
           type Foo = {
             foo: number,
           }
-          const FooType = t.object({
-            foo: t.number(),
-          })
+          const FooType: t.Type<Foo> = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
         `,
       }
     )

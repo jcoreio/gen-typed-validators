@@ -92,7 +92,7 @@ async function integrationTest(
 
 describe(`convertFlowType`, function() {
   test('any', 't.any()')
-  test('mixed', 't.any()')
+  test('mixed', 't.unknown()')
   test('void', 't.undefined()')
   test('null', 't.null()')
   test('boolean', 't.boolean()')
@@ -165,13 +165,14 @@ describe(`convertFlowType`, function() {
     /Multiple indexers aren't supported/
   )
 
-  it(`converts locally reified type aliases`, async function() {
+  it(`converts locally reified spread type aliases`, async function() {
     await integrationTest(
       {
         '/a': `
           import {reify, type Type} from 'flow-runtime'
           type Foo = {| foo: number |}
-          type Bar = {| ...Foo, bar: string |}
+          type Baz = {| baz: number |}
+          type Bar = {| ...$Exact<Foo>, ...Baz, bar: string |}
           const BarType = (reify: Type<Bar>)
         `,
       },
@@ -187,12 +188,25 @@ describe(`convertFlowType`, function() {
               foo: t.number(),
             })
           )
-          type Bar = {| ...Foo, bar: string |}
-          const BarType = t.merge(
-            t.ref(() => FooType),
+          type Baz = {|
+            baz: number,
+          |}
+          const BazType: t.Type<Baz> = t.alias(
+            'Baz',
             t.object({
-              bar: t.string()
+              baz: t.number(),
             })
+          )
+          type Bar = {| ...$Exact<Foo>, ...Baz, bar: string |}
+          const BarType: t.Type<Bar> = t.alias(
+            'Bar',
+            t.merge(
+              t.ref(() => FooType),
+              t.ref(() => BazType),
+              t.object({
+                bar: t.string()
+              })
+            )
           )
         `,
       }
