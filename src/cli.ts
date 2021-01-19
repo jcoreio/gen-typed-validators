@@ -39,7 +39,7 @@ async function parseFile(file: string): Promise<t.File> {
   })
 }
 
-async function go() {
+async function go(): Promise<void> {
   const context = new ConversionContext({
     parseFile,
     resolve: promisify(resolve) as any,

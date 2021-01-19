@@ -146,6 +146,7 @@ export class FileConversionContext {
       | NodePath<t.TypeCastExpression>
       | NodePath<t.TSAsExpression>
     )[] = []
+    const validatorDeclarators: NodePath<t.VariableDeclarator>[] = []
     traverse(ast, {
       TypeCastExpression: (path: NodePath<t.TypeCastExpression>) => {
         if (getReifiedType(path)) {
@@ -159,9 +160,18 @@ export class FileConversionContext {
           path.skip()
         }
       },
+      VariableDeclarator: (path: NodePath<t.VariableDeclarator>) => {
+        if (getReifiedType(path)) {
+          validatorDeclarators.push(path)
+          path.skip()
+        }
+      },
     })
     for (const path of reifyCalls) {
       await this.replaceReifyCall(path)
+    }
+    for (const path of validatorDeclarators) {
+      await this.replaceValidatorDeclarator(path)
     }
     traverse(ast, {
       ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
@@ -215,15 +225,6 @@ export class FileConversionContext {
             ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
             : (reifiedType as NodePath<t.TSTypeReference>).get('typeName')
         )
-
-        const { parentPath } = path
-        if (kind !== 'class' && parentPath.isVariableDeclarator()) {
-          const { id } = parentPath.node as t.VariableDeclarator
-          if (id.type === 'Identifier' && areReferencesEqual(converted, id)) {
-            parentPath.remove()
-            return
-          }
-        }
         path.replaceWith(
           await this.convertTypeReferenceToValidator({ converted, kind })
         )
@@ -235,8 +236,55 @@ export class FileConversionContext {
     path.replaceWith(await this.convert(reifiedType))
   }
 
+  async replaceValidatorDeclarator(
+    path: NodePath<t.VariableDeclarator>
+  ): Promise<void> {
+    const reifiedType = getReifiedType(path)
+    if (!reifiedType) return
+    if (reifiedType.isGenericTypeAnnotation()) {
+      const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
+      const convertedUtility = await convertUtilityFlowType(this, genType)
+      if (convertedUtility) {
+        path.replaceWith(convertedUtility)
+        return
+      }
+    }
+    if (
+      reifiedType.isGenericTypeAnnotation() ||
+      reifiedType.isTSTypeReference()
+    ) {
+      await this.convertTypeReference(
+        reifiedType.isGenericTypeAnnotation()
+          ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
+          : (reifiedType as NodePath<t.TSTypeReference>).get('typeName')
+      )
+    }
+  }
+
+  preexistingImportT = once(
+    async (): Promise<t.Identifier | undefined> => {
+      const ast = await this.parseFile(this.file)
+      let result: t.Identifier | undefined
+      traverse(ast, {
+        ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
+          if (path.node.source.value !== 'typed-validators') path.skip()
+        },
+        ImportNamespaceSpecifier: (
+          path: NodePath<t.ImportNamespaceSpecifier>
+        ) => {
+          path.stop()
+          result = path.node.local
+        },
+      })
+      return result
+    }
+  )
+
   importT = once(
     async (): Promise<t.Identifier> => {
+      const preexisting = await this.preexistingImportT()
+      if (preexisting) return preexisting
+
       const ast = await this.parseFile(this.file)
       let program: NodePath<t.Program> | undefined
       let lastImport: NodePath<t.ImportDeclaration> | undefined
@@ -398,10 +446,15 @@ export class FileConversionContext {
           ),
         }) as any
 
-        const { parentPath } = path
-        if (parentPath.isExportNamedDeclaration())
-          parentPath.insertAfter(t.exportNamedDeclaration(validator))
-        else path.insertAfter(validator)
+        const binding = path.scope.getBinding(validatorId.name)
+        if (binding && binding.path.isVariableDeclarator()) {
+          binding.path.replaceWith(validator.declarations[0])
+        } else {
+          const { parentPath } = path
+          if (parentPath.isExportNamedDeclaration())
+            parentPath.insertAfter(t.exportNamedDeclaration(validator))
+          else path.insertAfter(validator)
+        }
         return { converted: validatorId, kind: 'alias' }
       }
       case 'TSTypeAliasDeclaration': {
@@ -424,10 +477,16 @@ export class FileConversionContext {
             (path as NodePath<t.TSTypeAliasDeclaration>).get('typeAnnotation')
           ),
         }) as any
-        const { parentPath } = path
-        if (parentPath.isExportNamedDeclaration())
-          parentPath.insertAfter(t.exportNamedDeclaration(validator))
-        else path.insertAfter(validator)
+
+        const binding = path.scope.getBinding(validatorId.name)
+        if (binding && binding.path.isVariableDeclarator()) {
+          binding.path.replaceWith(validator.declarations[0])
+        } else {
+          const { parentPath } = path
+          if (parentPath.isExportNamedDeclaration())
+            parentPath.insertAfter(t.exportNamedDeclaration(validator))
+          else path.insertAfter(validator)
+        }
         return { converted: validatorId, kind: 'alias' }
       }
       case 'ImportDefaultSpecifier':

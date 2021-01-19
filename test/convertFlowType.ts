@@ -212,6 +212,54 @@ describe(`convertFlowType`, function() {
       }
     )
   })
+  it(`reconverts local validator declarations and dependent type validators`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          type Foo = {| foo: number |}
+          type Baz = {| baz: number |}
+          const BazType = t.object({})
+          type Bar = {| ...$Exact<Foo>, ...Baz, bar: string |}
+          export const BarType: t.TypeAlias<Bar> = t.object({})
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          type Foo = {|
+            foo: number,
+          |}
+          const FooType: t.TypeAlias<Foo> = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+          type Baz = {|
+            baz: number,
+          |}
+          const BazType: t.TypeAlias<Baz> = t.alias(
+            'Baz',
+            t.object({
+              baz: t.number(),
+            })
+          )
+          type Bar = {| ...$Exact<Foo>, ...Baz, bar: string |}
+          export const BarType: t.TypeAlias<Bar> = t.alias(
+            'Bar',
+            t.merge(
+              t.ref(() => FooType),
+              t.ref(() => BazType),
+              t.object({
+                bar: t.string()
+              })
+            )
+          )
+        `,
+      }
+    )
+  })
   it(`converts locally reified builtin type`, async function() {
     await integrationTest(
       {
