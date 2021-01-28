@@ -4,6 +4,9 @@
   "description": "convert type annotations to typed-validators",
   "main": "index.js",
   "sideEffects": false,
+  "bin": {
+    "regen-typed-validators": "./cli.js"
+  },
   "scripts": {
     "lint": "eslint $npm_package_config_lint",
     "lint:fix": "eslint $npm_package_config_lint",

@@ -105,6 +105,10 @@ export class ConversionContext {
 export class FileConversionContext {
   public readonly context: ConversionContext
   public readonly file: string
+  /**
+   * Indicates the AST may have been modified.  false means it definitely hasn't been modified.
+   */
+  private _dirty = false
   private convertedTypeReferences: Map<
     t.Node,
     ConvertedTypeReference
@@ -113,6 +117,10 @@ export class FileConversionContext {
   constructor({ context, file }: { context: ConversionContext; file: string }) {
     this.context = context
     this.file = file
+  }
+
+  get dirty(): boolean {
+    return this._dirty
   }
 
   get getValidatorName(): GetValidatorName {
@@ -176,6 +184,7 @@ export class FileConversionContext {
     traverse(ast, {
       ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
         if (path.node.source.value === 'flow-runtime') {
+          this._dirty = true
           const validationImport = path.node.specifiers
             ? path.node.specifiers.find(
                 s =>
@@ -207,6 +216,9 @@ export class FileConversionContext {
   ): Promise<void> {
     const reifiedType = getReifiedType(path)
     if (!reifiedType) return
+
+    this._dirty = true
+
     if (reifiedType.isGenericTypeAnnotation()) {
       const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
       const convertedUtility = await convertUtilityFlowType(this, genType)
@@ -241,6 +253,9 @@ export class FileConversionContext {
   ): Promise<void> {
     const reifiedType = getReifiedType(path)
     if (!reifiedType) return
+
+    this._dirty = true
+
     if (reifiedType.isGenericTypeAnnotation()) {
       const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
       const convertedUtility = await convertUtilityFlowType(this, genType)
@@ -285,6 +300,8 @@ export class FileConversionContext {
       const preexisting = await this.preexistingImportT()
       if (preexisting) return preexisting
 
+      this._dirty = true
+
       const ast = await this.parseFile(this.file)
       let program: NodePath<t.Program> | undefined
       let lastImport: NodePath<t.ImportDeclaration> | undefined
@@ -309,6 +326,8 @@ export class FileConversionContext {
   )
 
   async convertExport(name: string): Promise<ConvertedTypeReference> {
+    this._dirty = true
+
     const ast = await this.parseFile(this.file)
     let pathToConvert: NodePath<any> | undefined
     if (name === 'default') {

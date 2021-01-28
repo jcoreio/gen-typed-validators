@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import * as fs from 'fs-extra'
 import resolve from 'resolve'
 import { promisify } from 'util'
@@ -11,7 +13,24 @@ import prettier from 'prettier'
 import inquirer from 'inquirer'
 import defaultParseFile from './util/defaultParseFile'
 
-const { _: files } = yargs.argv
+const { _: files, quiet, write } = yargs
+  .usage('$0 <files>')
+  .option('q', {
+    alias: 'quiet',
+    type: 'boolean',
+    describe: 'reduce output',
+  })
+  .option('w', {
+    alias: 'write',
+    type: 'boolean',
+    describe: 'write without asking for confirmation',
+  })
+  .help().argv
+
+if (!files.length) {
+  yargs.showHelp()
+  process.exit(1)
+}
 
 async function go(): Promise<void> {
   const context = new ConversionContext({
@@ -28,7 +47,7 @@ async function go(): Promise<void> {
         async (file: string | number): Promise<void> => {
           if (typeof file !== 'string') return
           // eslint-disable-next-line no-console
-          console.log(file)
+          if (!quiet) console.error('Processing', file)
           await context.forFile(Path.resolve(file)).processFile()
         }
       )
@@ -51,6 +70,13 @@ async function go(): Promise<void> {
             ? 'typescript'
             : 'babel-flow'
         }
+        if (!context.forFile(file).dirty) {
+          return {
+            file,
+            original: '',
+            converted: '',
+          }
+        }
         return {
           file,
           original: prettier.format(
@@ -66,30 +92,35 @@ async function go(): Promise<void> {
   for (const { file, original, converted } of diffs) {
     if (converted === original) {
       // eslint-disable-next-line no-console
-      console.log('Unchanged:', file)
+      if (!quiet) console.error('Unchanged:', file)
       continue
     }
     convertedCount++
     // eslint-disable-next-line no-console
-    console.log(`\n\n${file}\n======================================\n\n`)
+    console.error(`\n\n${file}\n======================================`)
     printDiff(original, converted)
   }
   if (convertedCount === 0) return
-  const { write } = await inquirer.prompt([
-    {
-      name: 'write',
-      type: 'confirm',
-      default: false,
-    },
-  ])
-  if (!write) return
+  if (!write) {
+    const { write: _write } = await inquirer.prompt([
+      {
+        name: 'write',
+        type: 'confirm',
+        default: false,
+      },
+    ])
+    if (!_write) return
+  }
   await Promise.all(
-    diffs.map(async ({ file, converted }) => {
-      await fs.writeFile(file, converted, 'utf8')
-      // eslint-disable-next-line no-console
-      console.log('wrote', file)
-    })
+    diffs
+      .filter(d => d.converted !== d.original)
+      .map(async ({ file, converted }) => {
+        await fs.writeFile(file, converted, 'utf8')
+        // eslint-disable-next-line no-console
+        if (!quiet) console.error('wrote', file)
+      })
   )
+  process.exit(0)
 }
 
 go()
