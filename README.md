@@ -6,26 +6,3 @@
 [![Commitizen friendly](https://img.shields.io/badge/commitizen-friendly-brightgreen.svg)](http://commitizen.github.io/cz-cli/)
 [![npm version](https://badge.fury.io/js/typed-validators-codemods.svg)](https://badge.fury.io/js/typed-validators-codemods)
 
-This is my personal skeleton for creating an typescript library npm package. You are welcome to use it.
-
-## Quick start
-
-```sh
-npx 0-60 clone https://github.com/jcoreio/typed-validators-codemods.git
-```
-
-## Tools used
-
-- babel 7
-- typescript
-- mocha
-- chai
-- istanbul
-- nyc
-- eslint
-- prettier
-- husky
-- semantic-release
-- renovate
-- Circle CI
-- Codecov.io
