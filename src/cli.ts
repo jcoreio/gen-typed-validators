@@ -1,6 +1,5 @@
 import * as fs from 'fs-extra'
 import resolve from 'resolve'
-import { parse } from '@babel/parser'
 import { promisify } from 'util'
 import { ConversionContext } from './convert/index'
 import printDiff from 'print-diff'
@@ -10,39 +9,18 @@ import * as Path from 'path'
 import yargs from 'yargs'
 import prettier from 'prettier'
 import inquirer from 'inquirer'
+import defaultParseFile from './util/defaultParseFile'
 
 const { _: files } = yargs.argv
 
-async function parseFile(file: string): Promise<t.File> {
-  return recast.parse(await fs.readFile(file, 'utf8'), {
-    parser: {
-      parse: (code: string): any =>
-        parse(code, {
-          plugins: [
-            /\.tsx?$/.test(file) ? 'typescript' : ['flow', { all: true }],
-            'jsx',
-            'classProperties',
-            'exportDefaultFrom',
-            'asyncGenerators',
-            'objectRestSpread',
-            'optionalChaining',
-            'exportDefaultFrom',
-            'exportNamespaceFrom',
-            'dynamicImport',
-            'nullishCoalescingOperator',
-            'bigint' as any,
-          ],
-          tokens: true,
-          sourceType: 'unambiguous',
-        }),
-    },
-  })
-}
-
 async function go(): Promise<void> {
   const context = new ConversionContext({
-    parseFile,
-    resolve: promisify(resolve) as any,
+    parseFile: defaultParseFile,
+    resolve: (file: string, options: { basedir: string }): Promise<string> =>
+      promisify(resolve as any)(file, {
+        ...options,
+        extensions: ['.tsx', '.ts', '.jsx', '.js'],
+      }) as any,
   })
   try {
     await Promise.all(
@@ -67,8 +45,11 @@ async function go(): Promise<void> {
         original: string
         converted: string
       }> => {
-        const prettierOptions = (await prettier.resolveConfig(file)) || {
-          parser: /\.tsx?$/.test(file) ? 'typescript' : 'babel-flow',
+        const prettierOptions = (await prettier.resolveConfig(file)) || {}
+        if (!prettierOptions.parser) {
+          prettierOptions.parser = /\.tsx?$/.test(file)
+            ? 'typescript'
+            : 'babel-flow'
         }
         return {
           file,

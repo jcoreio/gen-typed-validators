@@ -560,7 +560,18 @@ export class FileConversionContext {
           const finalSpecifier = finalPath.node
           moveImportKindToSpecifiers(importDeclaration.node)
           if (kind === 'class') finalSpecifier.importKind = 'value'
-          else finalPath.insertAfter(t.importSpecifier(id, converted))
+          else {
+            const existing = finalPath.parentPath
+              .get('specifiers')
+              .find(
+                p =>
+                  p.node.type === 'ImportSpecifier' &&
+                  areReferencesEqual(p.node.imported, converted) &&
+                  areReferencesEqual(p.node.local, id)
+              )
+            if (!existing)
+              finalPath.insertAfter(t.importSpecifier(id, converted))
+          }
         }
         return { converted: id, kind }
       }

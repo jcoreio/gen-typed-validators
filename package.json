@@ -101,6 +101,7 @@
     "@commitlint/config-conventional": "^11.0.0",
     "@jedwards1211/commitlint-config": "^1.0.1",
     "@jedwards1211/eslint-config-typescript": "^1.0.0",
+    "@types/babel__core": "^7.1.12",
     "@types/babel__generator": "^7.6.2",
     "@types/babel__template": "^7.4.0",
     "@types/babel__traverse": "^7.11.0",

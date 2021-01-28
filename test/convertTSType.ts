@@ -426,6 +426,43 @@ describe(`convertTSType`, function() {
       }
     )
   })
+  it.only(`doesn't add duplicate import specifiers`, async function() {
+    await integrationTest(
+      {
+        '/a': `
+          import {default as Foob, defaultType as FoobType} from './foo'
+          const FooType = reify as Type<Foob>
+        `,
+        '/foo': `
+          type Foo = {
+            foo: number
+          }
+          export default Foo
+        `,
+      },
+      {
+        '/a': `
+          import {default as Foob, defaultType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          type Foo = {
+            foo: number
+          }
+          const FooType: t.TypeAlias<Foo> = t.alias(
+            'Foo',
+            t.object({
+              foo: t.number(),
+            })
+          )
+          export default Foo
+          export {FooType as defaultType}
+        `,
+      }
+    )
+  })
   it(`converts default class import`, async function() {
     await integrationTest(
       {
