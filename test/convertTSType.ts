@@ -35,12 +35,12 @@ function test(
   { name = `${input} -> ${expected}` }: { name?: string } = {}
 ): void {
   it(name, async function() {
-    const converted = await new ConversionContext({
-      resolve: async f => f,
-      parseFile: async (): Promise<t.File> => parse(''),
-    })
-      .forFile('temp.js')
-      .convert(getTSTypePath(input))
+    const converted = await (
+      await new ConversionContext({
+        resolve: async (f: string): Promise<string> => f,
+        parseFile: async (): Promise<t.File> => parse(''),
+      }).forFile('temp.js')
+    ).convert(getTSTypePath(input))
     assertExpressionsEqual(converted, expected)
   })
 }
@@ -52,12 +52,12 @@ function testError(
 ): void {
   it(name, async function() {
     await expect(
-      new ConversionContext({
-        resolve: async f => f,
-        parseFile: async (): Promise<t.File> => parse(''),
-      })
-        .forFile('temp.js')
-        .convert(getTSTypePath(input))
+      (
+        await new ConversionContext({
+          resolve: async (f: string): Promise<string> => f,
+          parseFile: async (): Promise<t.File> => parse(''),
+        }).forFile('temp.js')
+      ).convert(getTSTypePath(input))
     ).to.be.rejectedWith(expected)
   })
 }
@@ -80,9 +80,9 @@ async function integrationTest(
       })
     },
   })
-  for (const file in input) await context.forFile(file).processFile()
+  for (const file in input) await (await context.forFile(file)).processFile()
   for (const file in expected) {
-    const ast = context.fileASTs.get(file)
+    const ast = (await context.forFile(file)).processedAST
     if (!ast) throw new Error(`missing result AST for file: ${file}`)
     expect(normalizeTS(ast), `expected file ${file} to match`).to.equal(
       normalizeTS(expected[file])
@@ -426,7 +426,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it.only(`doesn't add duplicate import specifiers`, async function() {
+  it(`doesn't add duplicate import specifiers`, async function() {
     await integrationTest(
       {
         '/a': `

@@ -16,6 +16,7 @@ import areReferencesEqual from './areReferencesEqual'
 import getKey from './getKey'
 import convertUtilityFlowType from './convertUtilityFlowType'
 import moveLeadingCommentsToNextSibling from './moveCommentsToNextSibling'
+import areASTsEqual from '../util/areASTsEqual'
 
 const templates = {
   importTypedValidators: template.statement`import * as T from 'typed-validators'`,
@@ -60,9 +61,8 @@ export class ConversionContext {
   public readonly getValidatorName: GetValidatorName
   public readonly resolve: Resolve
   public readonly defaultExact: boolean
-  private readonly _parseFile: ParseFile
+  public readonly parseFile: ParseFile
   private fileContexts: Map<string, FileConversionContext> = new Map()
-  public fileASTs: Map<string, t.File> = new Map()
 
   constructor({
     typedValidatorsIdentifier = t.identifier('t'),
@@ -80,31 +80,36 @@ export class ConversionContext {
     this.t = typedValidatorsIdentifier
     this.getValidatorName = getValidatorName
     this.resolve = resolve
-    this._parseFile = parseFile
+    this.parseFile = parseFile
     this.defaultExact = defaultExact
   }
 
-  parseFile = async (file: string): Promise<t.File> => {
-    let ast = this.fileASTs.get(file)
-    if (ast) return ast
-    ast = await this._parseFile(file)
-    this.fileASTs.set(file, ast)
-    return ast
-  }
-
-  forFile(file: string): FileConversionContext {
+  async forFile(file: string): Promise<FileConversionContext> {
     const existing = this.fileContexts.get(file)
     if (existing) return existing
+    const originalAST = await this.parseFile(file)
+    const processedAST = await this.parseFile(file)
     // eslint-disable-next-line @typescript-eslint/no-use-before-define
-    const result = new FileConversionContext({ context: this, file })
+    const result = new FileConversionContext({
+      context: this,
+      file,
+      originalAST,
+      processedAST,
+    })
     this.fileContexts.set(file, result)
     return result
+  }
+
+  *files(): Iterable<FileConversionContext> {
+    yield* this.fileContexts.values()
   }
 }
 
 export class FileConversionContext {
   public readonly context: ConversionContext
   public readonly file: string
+  public readonly originalAST: t.File
+  public readonly processedAST: t.File
   /**
    * Indicates the AST may have been modified.  false means it definitely hasn't been modified.
    */
@@ -114,20 +119,29 @@ export class FileConversionContext {
     ConvertedTypeReference
   > = new Map()
 
-  constructor({ context, file }: { context: ConversionContext; file: string }) {
+  constructor({
+    context,
+    file,
+    originalAST,
+    processedAST,
+  }: {
+    context: ConversionContext
+    file: string
+    originalAST: t.File
+    processedAST: t.File
+  }) {
     this.context = context
     this.file = file
+    this.originalAST = originalAST
+    this.processedAST = processedAST
   }
 
-  get dirty(): boolean {
-    return this._dirty
+  get changed(): boolean {
+    return this._dirty && !areASTsEqual(this.originalAST, this.processedAST)
   }
 
   get getValidatorName(): GetValidatorName {
     return this.context.getValidatorName
-  }
-  get parseFile(): ParseFile {
-    return this.context.parseFile
   }
   get defaultExact(): boolean {
     return this.context.defaultExact
@@ -149,7 +163,7 @@ export class FileConversionContext {
   }
 
   async processFile(): Promise<void> {
-    const ast = await this.parseFile(this.file)
+    const ast = this.processedAST
     const reifyCalls: (
       | NodePath<t.TypeCastExpression>
       | NodePath<t.TSAsExpression>
@@ -278,7 +292,7 @@ export class FileConversionContext {
 
   preexistingImportT = once(
     async (): Promise<t.Identifier | undefined> => {
-      const ast = await this.parseFile(this.file)
+      const ast = this.processedAST
       let result: t.Identifier | undefined
       traverse(ast, {
         ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
@@ -302,7 +316,7 @@ export class FileConversionContext {
 
       this._dirty = true
 
-      const ast = await this.parseFile(this.file)
+      const ast = this.processedAST
       let program: NodePath<t.Program> | undefined
       let lastImport: NodePath<t.ImportDeclaration> | undefined
       traverse(ast, {
@@ -328,7 +342,7 @@ export class FileConversionContext {
   async convertExport(name: string): Promise<ConvertedTypeReference> {
     this._dirty = true
 
-    const ast = await this.parseFile(this.file)
+    const ast = this.processedAST
     let pathToConvert: NodePath<any> | undefined
     if (name === 'default') {
       traverse(ast, {
@@ -549,7 +563,7 @@ export class FileConversionContext {
           this.file,
           importDeclaration
         )
-        const sourceContext = this.context.forFile(sourceFile)
+        const sourceContext = await this.context.forFile(sourceFile)
         const { converted, kind } = await sourceContext.convertExport(
           getKey(imported)
         )

@@ -3,10 +3,9 @@
 import * as fs from 'fs-extra'
 import resolve from 'resolve'
 import { promisify } from 'util'
-import { ConversionContext } from './convert/index'
+import { ConversionContext, FileConversionContext } from './convert/index'
 import printDiff from 'print-diff'
 import * as recast from 'recast'
-import * as t from '@babel/types'
 import * as Path from 'path'
 import yargs from 'yargs'
 import prettier from 'prettier'
@@ -48,7 +47,7 @@ async function go(): Promise<void> {
           if (typeof file !== 'string') return
           // eslint-disable-next-line no-console
           if (!quiet) console.error('Processing', file)
-          await context.forFile(Path.resolve(file)).processFile()
+          await (await context.forFile(Path.resolve(file))).processFile()
         }
       )
     )
@@ -58,24 +57,27 @@ async function go(): Promise<void> {
     return
   }
   const diffs = await Promise.all(
-    [...context.fileASTs.entries()].map(
-      async ([file, ast]: [string, t.File]): Promise<{
+    [...context.files()].map(
+      async (
+        context: FileConversionContext
+      ): Promise<{
         file: string
         original: string
         converted: string
       }> => {
-        const prettierOptions = (await prettier.resolveConfig(file)) || {}
-        if (!prettierOptions.parser) {
-          prettierOptions.parser = /\.tsx?$/.test(file)
-            ? 'typescript'
-            : 'babel-flow'
-        }
-        if (!context.forFile(file).dirty) {
+        const { file, processedAST, changed } = context
+        if (!changed) {
           return {
             file,
             original: '',
             converted: '',
           }
+        }
+        const prettierOptions = (await prettier.resolveConfig(file)) || {}
+        if (!prettierOptions.parser) {
+          prettierOptions.parser = /\.tsx?$/.test(file)
+            ? 'typescript'
+            : 'babel-flow'
         }
         return {
           file,
@@ -83,7 +85,10 @@ async function go(): Promise<void> {
             await fs.readFile(file, 'utf8'),
             prettierOptions
           ),
-          converted: prettier.format(recast.print(ast).code, prettierOptions),
+          converted: prettier.format(
+            recast.print(processedAST).code,
+            prettierOptions
+          ),
         }
       }
     )
