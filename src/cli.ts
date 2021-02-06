@@ -118,7 +118,7 @@ async function go(): Promise<void> {
   }
   await Promise.all(
     diffs
-      .filter(d => d.converted !== d.original)
+      .filter((d) => d.converted !== d.original)
       .map(async ({ file, converted }) => {
         await fs.writeFile(file, converted, 'utf8')
         // eslint-disable-next-line no-console

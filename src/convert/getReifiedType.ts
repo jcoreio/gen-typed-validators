@@ -40,18 +40,18 @@ function getReifiedTypeFromAnnotation(
         (annotation as NodePath<t.TSTypeAnnotation>).get('typeAnnotation')
       )
     case 'GenericTypeAnnotation': {
-      const annotationId = (annotation as NodePath<
-        t.GenericTypeAnnotation
-      >).get('id')
+      const annotationId = (annotation as NodePath<t.GenericTypeAnnotation>).get(
+        'id'
+      )
       if (!isTypeValidatorAnnotation(annotationId)) return null
 
-      const typeParameters = (annotation as NodePath<
-        t.GenericTypeAnnotation
-      >).get('typeParameters')
+      const typeParameters = (annotation as NodePath<t.GenericTypeAnnotation>).get(
+        'typeParameters'
+      )
       if (!typeParameters) return null
-      const params = (typeParameters as NodePath<
-        t.TypeParameterInstantiation
-      >).get('params')
+      const params = (typeParameters as NodePath<t.TypeParameterInstantiation>).get(
+        'params'
+      )
       if (Array.isArray(params) && params[0].isFlowType())
         return params[0] as NodePath<t.FlowType>
       break
@@ -66,9 +66,9 @@ function getReifiedTypeFromAnnotation(
         'typeParameters'
       )
       if (!typeParameters) return null
-      const params = (typeParameters as NodePath<
-        t.TSTypeParameterInstantiation
-      >).get('params')
+      const params = (typeParameters as NodePath<t.TSTypeParameterInstantiation>).get(
+        'params'
+      )
       if (Array.isArray(params) && params[0]) return params[0]
       break
     }

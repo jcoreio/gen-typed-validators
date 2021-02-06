@@ -34,7 +34,7 @@ function test(
   expected: string,
   { name = `${input} -> ${expected}` }: { name?: string } = {}
 ): void {
-  it(name, async function() {
+  it(name, async function () {
     const converted = await (
       await new ConversionContext({
         resolve: async (f: string): Promise<string> => f,
@@ -50,7 +50,7 @@ function testError(
   expected: string | RegExp,
   { name = `${input} throws ${expected}` }: { name?: string } = {}
 ): void {
-  it(name, async function() {
+  it(name, async function () {
     await expect(
       (
         await new ConversionContext({
@@ -90,7 +90,7 @@ async function integrationTest(
   }
 }
 
-describe(`convertTSType`, function() {
+describe(`convertTSType`, function () {
   test('void', 't.undefined()')
   test('undefined', 't.undefined()')
   test('null', 't.null()')
@@ -143,7 +143,7 @@ describe(`convertTSType`, function() {
   testError('Record<string>', /Record is missing value type/)
   testError('{ [foo + bar]: string }', /Unsupported key type/)
 
-  it(`converts locally reified type alias`, async function() {
+  it(`converts locally reified type alias`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -169,7 +169,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts locally reified builtin type`, async function() {
+  it(`converts locally reified builtin type`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -184,7 +184,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`reconverts local validator declarations and dependent type validators`, async function() {
+  it(`reconverts local validator declarations and dependent type validators`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -238,7 +238,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts locally reified builtin class`, async function() {
+  it(`converts locally reified builtin class`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -253,7 +253,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts locally reified class`, async function() {
+  it(`converts locally reified class`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -270,7 +270,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts named type import`, async function() {
+  it(`converts named type import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -304,7 +304,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts named type import that's indirectly exported`, async function() {
+  it(`converts named type import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -341,7 +341,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts named class import`, async function() {
+  it(`converts named class import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -364,7 +364,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts named class import that's indirectly exported`, async function() {
+  it(`converts named class import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -389,7 +389,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts default type import that's indirectly exported`, async function() {
+  it(`converts default type import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -426,7 +426,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`doesn't add duplicate import specifiers`, async function() {
+  it(`doesn't add duplicate import specifiers`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -463,7 +463,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts default class import`, async function() {
+  it(`converts default class import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -486,7 +486,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts default class import that's indirectly exported`, async function() {
+  it(`converts default class import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -511,7 +511,7 @@ describe(`convertTSType`, function() {
       }
     )
   })
-  it(`converts import from deps to any`, async function() {
+  it(`converts import from deps to any`, async function () {
     await integrationTest(
       {
         '/a': `

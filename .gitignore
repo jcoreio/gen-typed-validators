@@ -5,7 +5,10 @@ node_modules
 .eslintcache
 *.js
 *.js.flow
-*.ts
-!/src
-!/test
+*.d.ts
+!/src/**/*.ts
+!/src/**/*.js
+!/src/**/*.js.flow
+!/test/**/*.ts
+!/test/**/*.js
 !/.babelrc.js

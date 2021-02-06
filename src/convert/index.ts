@@ -201,7 +201,7 @@ export class FileConversionContext {
           this._dirty = true
           const validationImport = path.node.specifiers
             ? path.node.specifiers.find(
-                s =>
+                (s) =>
                   s.type === 'ImportSpecifier' &&
                   s.imported.type === 'Identifier' &&
                   s.imported.name === 'Validation'
@@ -525,9 +525,7 @@ export class FileConversionContext {
       case 'ImportDefaultSpecifier':
       case 'ImportSpecifier': {
         const specifier = type as t.ImportSpecifier | t.ImportDefaultSpecifier
-        const importDeclaration = path.parentPath as NodePath<
-          t.ImportDeclaration
-        >
+        const importDeclaration = path.parentPath as NodePath<t.ImportDeclaration>
         const { local } = specifier
         const imported =
           specifier.type === 'ImportDefaultSpecifier'
@@ -597,7 +595,7 @@ export class FileConversionContext {
             const existing = finalPath.parentPath
               .get('specifiers')
               .find(
-                p =>
+                (p) =>
                   p.node.type === 'ImportSpecifier' &&
                   areReferencesEqual(p.node.imported, converted) &&
                   areReferencesEqual(p.node.local, id)
@@ -721,7 +719,7 @@ export class FileConversionContext {
           TYPES: await Promise.all(
             (path as NodePath<t.TupleTypeAnnotation>)
               .get('types')
-              .map(type => this.convert(type))
+              .map((type) => this.convert(type))
           ),
         })
       case 'TSTupleType':
@@ -730,7 +728,7 @@ export class FileConversionContext {
           TYPES: await Promise.all(
             (path as NodePath<t.TSTupleType>)
               .get('elementTypes')
-              .map(type => this.convert(type))
+              .map((type) => this.convert(type))
           ),
         })
       case 'TSNamedTupleMember':
@@ -743,7 +741,7 @@ export class FileConversionContext {
           TYPES: await Promise.all(
             (path as NodePath<t.UnionTypeAnnotation>)
               .get('types')
-              .map(type => this.convert(type))
+              .map((type) => this.convert(type))
           ),
         })
       case 'TSUnionType':
@@ -752,7 +750,7 @@ export class FileConversionContext {
           TYPES: await Promise.all(
             (path as NodePath<t.TSUnionType>)
               .get('types')
-              .map(type => this.convert(type))
+              .map((type) => this.convert(type))
           ),
         })
       case 'IntersectionTypeAnnotation':
@@ -761,7 +759,7 @@ export class FileConversionContext {
           TYPES: await Promise.all(
             (path as NodePath<t.IntersectionTypeAnnotation>)
               .get('types')
-              .map(type => this.convert(type))
+              .map((type) => this.convert(type))
           ),
         })
       case 'TSIntersectionType':
@@ -770,7 +768,7 @@ export class FileConversionContext {
           TYPES: await Promise.all(
             (path as NodePath<t.TSIntersectionType>)
               .get('types')
-              .map(type => this.convert(type))
+              .map((type) => this.convert(type))
           ),
         })
       case 'ObjectTypeAnnotation':

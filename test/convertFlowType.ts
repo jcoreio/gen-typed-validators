@@ -34,7 +34,7 @@ function test(
   expected: string,
   { name = `${input} -> ${expected}` }: { name?: string } = {}
 ): void {
-  it(name, async function() {
+  it(name, async function () {
     const converted = await (
       await new ConversionContext({
         resolve: async (f: string): Promise<string> => f,
@@ -50,7 +50,7 @@ function testError(
   expected: string | RegExp,
   { name = `${input} throws ${expected}` }: { name?: string } = {}
 ): void {
-  it(name, async function() {
+  it(name, async function () {
     await expect(
       (
         await new ConversionContext({
@@ -90,7 +90,7 @@ async function integrationTest(
   }
 }
 
-describe(`convertFlowType`, function() {
+describe(`convertFlowType`, function () {
   test('any', 't.any()')
   test('mixed', 't.unknown()')
   test('void', 't.undefined()')
@@ -165,7 +165,7 @@ describe(`convertFlowType`, function() {
     /Multiple indexers aren't supported/
   )
 
-  it(`converts locally reified spread type aliases`, async function() {
+  it(`converts locally reified spread type aliases`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -212,7 +212,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`reconverts local validator declarations and dependent type validators`, async function() {
+  it(`reconverts local validator declarations and dependent type validators`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -260,7 +260,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts locally reified builtin type`, async function() {
+  it(`converts locally reified builtin type`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -276,7 +276,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts locally reified builtin class`, async function() {
+  it(`converts locally reified builtin class`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -292,7 +292,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts locally reified class`, async function() {
+  it(`converts locally reified class`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -310,7 +310,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts named type import`, async function() {
+  it(`converts named type import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -345,7 +345,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts named type import that's indirectly exported`, async function() {
+  it(`converts named type import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -383,7 +383,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts named class import`, async function() {
+  it(`converts named class import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -407,7 +407,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts named class import that's indirectly exported`, async function() {
+  it(`converts named class import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -433,7 +433,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts named class type import`, async function() {
+  it(`converts named class type import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -457,7 +457,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts default type import that's indirectly exported`, async function() {
+  it(`converts default type import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -495,7 +495,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts default class import`, async function() {
+  it(`converts default class import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -519,7 +519,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts default class import that's indirectly exported`, async function() {
+  it(`converts default class import that's indirectly exported`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -545,7 +545,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts default class type import`, async function() {
+  it(`converts default class type import`, async function () {
     await integrationTest(
       {
         '/a': `
@@ -569,7 +569,7 @@ describe(`convertFlowType`, function() {
       }
     )
   })
-  it(`converts import from deps to any`, async function() {
+  it(`converts import from deps to any`, async function () {
     await integrationTest(
       {
         '/a': `
