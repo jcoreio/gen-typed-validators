@@ -1,7 +1,7 @@
 import { describe, it } from 'mocha'
 import { expect } from 'chai'
 import normalizeFlow from './util/normalizeFlow'
-import { ConversionContext } from '../src/convert/index'
+import ConversionContext from '../src/convert/ConversionContext'
 import { parse } from '@babel/parser'
 import traverse, { NodePath } from '@babel/traverse'
 import * as t from '@babel/types'

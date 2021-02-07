@@ -3,7 +3,9 @@
 import * as fs from 'fs-extra'
 import resolve from 'resolve'
 import { promisify } from 'util'
-import { ConversionContext, FileConversionContext } from './convert/index'
+import ConversionContext, {
+  FileConversionContext,
+} from './convert/ConversionContext'
 import printDiff from 'print-diff'
 import * as recast from 'recast'
 import * as Path from 'path'

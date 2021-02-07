@@ -1,6 +1,6 @@
 import * as t from '@babel/types'
 import template from '@babel/template'
-import { FileConversionContext } from './index'
+import { FileConversionContext } from './ConversionContext'
 import NodeConversionError from '../NodeConversionError'
 import { NodePath } from '@babel/traverse'
 import getExactArgument from './getExactArgument'

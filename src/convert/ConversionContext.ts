@@ -56,7 +56,7 @@ type ConvertedTypeReference = {
   kind: 'class' | 'alias' | 'any'
 }
 
-export class ConversionContext {
+export default class ConversionContext {
   public readonly t: t.Identifier
   public readonly getValidatorName: GetValidatorName
   public readonly resolve: Resolve

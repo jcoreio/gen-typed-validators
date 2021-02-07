@@ -1,7 +1,7 @@
 import * as t from '@babel/types'
 import { NodePath } from '@babel/traverse'
 import template from '@babel/template'
-import { FileConversionContext } from './index'
+import { FileConversionContext } from './ConversionContext'
 import getTypeParams from './getTypeParams'
 
 const templates = {

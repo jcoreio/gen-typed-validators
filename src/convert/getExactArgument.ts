@@ -1,6 +1,6 @@
 import * as t from '@babel/types'
 import { NodePath } from '@babel/traverse'
-import { FileConversionContext } from './index'
+import { FileConversionContext } from './ConversionContext'
 import getTypeParams from './getTypeParams'
 
 export default function getExactArgument(
