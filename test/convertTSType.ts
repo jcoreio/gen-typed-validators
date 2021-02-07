@@ -18,7 +18,7 @@ function getTSTypePath(code: string): NodePath<any> {
   const ast = parse(`_ as ${code}`, {
     plugins: ['typescript'],
   })
-  let path: NodePath<any>
+  let path: NodePath<any> | undefined
   traverse(ast, {
     TSAsExpression(p: NodePath<t.TSAsExpression>) {
       path = p.get('typeAnnotation')

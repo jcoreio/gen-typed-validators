@@ -18,7 +18,7 @@ function getFlowTypePath(code: string): NodePath<any> {
   const ast = parse(`(_: ${code})`, {
     plugins: [['flow', { all: true }]],
   })
-  let path: NodePath<any>
+  let path: NodePath<any> | undefined
   traverse(ast, {
     TypeAnnotation(p: NodePath<t.TypeAnnotation>) {
       path = p.get('typeAnnotation')
