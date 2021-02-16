@@ -8,13 +8,15 @@ const templates = {
   object: template.expression`T.object(PROPS)`,
 }
 
-export default async function convertTSTypeLiteral(
+export default async function convertTSTypeLiteralOrInterfaceBody(
   context: FileConversionContext,
-  path: NodePath<t.TSTypeLiteral>
+  path: NodePath<t.TSTypeLiteral> | NodePath<t.TSInterfaceBody>
 ): Promise<t.Expression> {
   const required: t.ObjectProperty[] = []
   const optional: t.ObjectProperty[] = []
-  for (const _property of path.get('members')) {
+  for (const _property of path.isTSTypeLiteral()
+    ? path.get('members')
+    : path.get('body')) {
     if (!_property.isTSPropertySignature()) {
       throw new NodeConversionError(
         `Unsupported object property`,

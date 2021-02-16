@@ -345,6 +345,107 @@ describe(`convertFlowType`, function () {
       }
     )
   })
+  it(`converts interface import`, async function () {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import {type Foo as Foob} from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          export interface Foo {
+            foo: number
+          }
+        `,
+      },
+      {
+        '/a': `
+          import {type Foo as Foob, FooType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import * as t from 'typed-validators'
+          export interface Foo {
+            foo: number
+          }
+          export const FooType: t.TypeAlias<Foo> = t.alias(
+            'Foo',
+            t.object({
+              exact: false,
+              required: {
+                foo: t.number(),
+              },
+            })
+          )
+        `,
+      }
+    )
+  })
+  it(`converts interface import that implements another imported interface`, async function () {
+    await integrationTest(
+      {
+        '/a': `
+          import {reify, type Type} from 'flow-runtime'
+          import {type Foo as Foob} from './foo'
+          const FooType = (reify: Type<Foob>)
+        `,
+        '/foo': `
+          import {type Bar} from './bar'
+          export interface Foo implements Bar {
+            foo: number
+          }
+        `,
+        '/bar': `
+          export interface Bar {
+            bar: string
+          }
+        `,
+      },
+      {
+        '/a': `
+          import {type Foo as Foob, FooType as FoobType} from './foo'
+          import * as t from 'typed-validators'
+          const FooType = t.ref(() => FoobType)
+        `,
+        '/foo': `
+          import {type Bar, BarType} from './bar'
+          import * as t from 'typed-validators'
+          export interface Foo implements Bar {
+            foo: number
+          }
+          export const FooType: t.TypeAlias<Foo> = t.alias(
+            'Foo',
+            t.mergeInexact(
+              t.ref(() => BarType),
+              t.object({
+                exact: false,
+                required: {
+                  foo: t.number(),
+                },
+              })
+            )
+          )
+        `,
+        '/bar': `
+          import * as t from 'typed-validators'
+          export interface Bar {
+            bar: string
+          } 
+          export const BarType: t.TypeAlias<Bar> = t.alias(
+            'Bar',
+            t.object({
+              exact: false,
+              required: {
+                bar: t.string(),
+              },
+            })
+          )
+        `,
+      }
+    )
+  })
   it(`converts named type import that's indirectly exported`, async function () {
     await integrationTest(
       {

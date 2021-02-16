@@ -1,10 +1,11 @@
 import * as t from '@babel/types'
 import template from '@babel/template'
 import traverse from '@babel/traverse'
-import convertTSRecordType, { isTSRecordType } from './TSRecordType'
-import convertObjectTypeAnnotation from './ObjectTypeAnnotation'
+import convertTSRecordType, { isTSRecordType } from './convertTSRecordType'
+import convertObjectTypeAnnotation from './convertObjectTypeAnnotation'
+import convertInterfaceDeclaration from './convertInterfaceDeclaration'
 import NodeConversionError from '../NodeConversionError'
-import convertTSTypeLiteral from './TSTypeLiteral'
+import convertTSTypeLiteral from './convertTSTypeLiteralOrInterfaceBody'
 import { NodePath } from '@babel/traverse'
 import { builtinClasses } from './builtinClasses'
 import { TSBindingVisitors } from '../ts/TSBindingVisitors'
@@ -17,6 +18,8 @@ import getKey from './getKey'
 import convertUtilityFlowType from './convertUtilityFlowType'
 import moveLeadingCommentsToNextSibling from './moveCommentsToNextSibling'
 import areASTsEqual from '../util/areASTsEqual'
+
+import convertTSInterfaceDeclaration from './convertTSInterfaceDeclaration'
 
 const templates = {
   importTypedValidators: template.statement`import * as T from 'typed-validators'`,
@@ -459,55 +462,51 @@ export class FileConversionContext {
       }
       case 'ClassDeclaration':
         return { converted: type.id, kind: 'class' }
-      case 'TypeAlias': {
-        const { id } = type as t.TypeAlias
-        const T = await this.importT()
-        const validatorId = this.getValidatorIdentifier(id)
-        const validatorIdWithType = this.getValidatorIdentifier(id)
-        validatorIdWithType.typeAnnotation = t.typeAnnotation(
-          t.genericTypeAnnotation(
-            t.qualifiedTypeIdentifier(t.identifier('TypeAlias'), T),
-            t.typeParameterInstantiation([t.genericTypeAnnotation(id)])
-          )
-        )
-        const validator: t.VariableDeclaration = templates.alias({
-          T,
-          ID: validatorIdWithType,
-          NAME: t.stringLiteral(id.name),
-          TYPE: await this.convert(
-            (path as NodePath<t.TypeAlias>).get('right')
-          ),
-        }) as any
-
-        const binding = path.scope.getBinding(validatorId.name)
-        if (binding && binding.path.isVariableDeclarator()) {
-          binding.path.replaceWith(validator.declarations[0])
-        } else {
-          const { parentPath } = path
-          if (parentPath.isExportNamedDeclaration())
-            parentPath.insertAfter(t.exportNamedDeclaration(validator))
-          else path.insertAfter(validator)
-        }
-        return { converted: validatorId, kind: 'alias' }
-      }
+      case 'InterfaceDeclaration':
+      case 'TSInterfaceDeclaration':
+      case 'TypeAlias':
       case 'TSTypeAliasDeclaration': {
-        const { id } = type as t.TSTypeAliasDeclaration
+        const casePath = path as
+          | NodePath<t.TypeAlias>
+          | NodePath<t.InterfaceDeclaration>
+          | NodePath<t.TSTypeAliasDeclaration>
+
+        const typeParameters: NodePath<any> = path.get('typeParameters') as any
+        if (typeParameters?.node)
+          throw new NodeConversionError(
+            'parameterized types are not supported',
+            this.file,
+            typeParameters
+          )
+
+        const { id } = casePath.node
         const T = await this.importT()
         const validatorId = this.getValidatorIdentifier(id)
         const validatorIdWithType = this.getValidatorIdentifier(id)
-        validatorIdWithType.typeAnnotation = t.tsTypeAnnotation(
-          t.tsTypeReference(
-            t.tsQualifiedName(T, t.identifier('TypeAlias')),
-            t.tsTypeParameterInstantiation([t.tsTypeReference(id)])
-          )
-        )
+        validatorIdWithType.typeAnnotation = path.isFlow()
+          ? t.typeAnnotation(
+              t.genericTypeAnnotation(
+                t.qualifiedTypeIdentifier(t.identifier('TypeAlias'), T),
+                t.typeParameterInstantiation([t.genericTypeAnnotation(id)])
+              )
+            )
+          : t.tsTypeAnnotation(
+              t.tsTypeReference(
+                t.tsQualifiedName(T, t.identifier('TypeAlias')),
+                t.tsTypeParameterInstantiation([t.tsTypeReference(id)])
+              )
+            )
 
         const validator: t.VariableDeclaration = templates.alias({
           T,
           ID: validatorIdWithType,
           NAME: t.stringLiteral(id.name),
           TYPE: await this.convert(
-            (path as NodePath<t.TSTypeAliasDeclaration>).get('typeAnnotation')
+            casePath.isTypeAlias()
+              ? casePath.get('right')
+              : casePath.isTSTypeAliasDeclaration()
+              ? casePath.get('typeAnnotation')
+              : casePath
           ),
         }) as any
 
@@ -776,10 +775,20 @@ export class FileConversionContext {
           this,
           path as NodePath<t.ObjectTypeAnnotation>
         )
+      case 'InterfaceDeclaration':
+        return await convertInterfaceDeclaration(
+          this,
+          path as NodePath<t.InterfaceDeclaration>
+        )
       case 'TSTypeLiteral':
         return await convertTSTypeLiteral(
           this,
           path as NodePath<t.TSTypeLiteral>
+        )
+      case 'TSInterfaceDeclaration':
+        return await convertTSInterfaceDeclaration(
+          this,
+          path as NodePath<t.TSInterfaceDeclaration>
         )
       case 'GenericTypeAnnotation': {
         const convertedUtility = await convertUtilityFlowType(this, path)
@@ -787,6 +796,22 @@ export class FileConversionContext {
         return await this.convertTypeReferenceToValidator(
           await this.convertTypeReference(
             (path as NodePath<t.GenericTypeAnnotation>).get('id')
+          )
+        )
+      }
+      case 'InterfaceExtends': {
+        return await this.convertTypeReferenceToValidator(
+          await this.convertTypeReference(
+            (path as NodePath<t.InterfaceExtends>).get('id')
+          )
+        )
+      }
+      case 'TSExpressionWithTypeArguments': {
+        return await this.convertTypeReferenceToValidator(
+          await this.convertTypeReference(
+            (path as NodePath<t.TSExpressionWithTypeArguments>).get(
+              'expression'
+            )
           )
         )
       }
