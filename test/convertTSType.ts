@@ -119,6 +119,33 @@ describe(`convertTSType`, function () {
       })`
   )
   test(
+    `{ 'hello-world': string, [key: string]: any }`,
+    `t.object({
+        exact: false,
+        required: {
+          "hello-world": t.string()
+        }
+      })`
+  )
+  test(
+    `{ 'hello-world': string, [key: any]: any }`,
+    `t.object({
+        exact: false,
+        required: {
+          "hello-world": t.string()
+        }
+      })`
+  )
+  test(
+    `{ 'hello-world': string, [key: string | symbol]: any }`,
+    `t.object({
+        exact: false,
+        required: {
+          "hello-world": t.string()
+        }
+      })`
+  )
+  test(
     '{ hello: string, world?: number }',
     `t.object({
         required: {

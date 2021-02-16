@@ -3,9 +3,11 @@ import * as t from '@babel/types'
 import { FileConversionContext } from './ConversionContext'
 import convertTSTypeLiteralOrInterfaceBody from './convertTSTypeLiteralOrInterfaceBody'
 import template from '@babel/template'
+import isInexactIndexer from './isInexactIndexer'
 
 const templates = {
   merge: template.expression(`%%T%%.merge(%%OBJECTS%%)`),
+  mergeInexact: template.expression(`%%T%%.mergeInexact(%%OBJECTS%%)`),
 }
 
 export default async function convertTSInterfaceDeclaration(
@@ -19,8 +21,15 @@ export default async function convertTSInterfaceDeclaration(
     context,
     path.get('body')
   )
+  const inexact =
+    path
+      .get('body')
+      .find(
+        ({ node }) => node.type === 'TSIndexSignature' && isInexactIndexer(node)
+      ) != null
+
   if (!extended?.length) return convertedBody
-  return templates.merge({
+  return (inexact ? templates.mergeInexact : templates.merge)({
     T: await context.importT(),
     OBJECTS: await Promise.all([
       ...extended.map((path) => context.convert(path)),

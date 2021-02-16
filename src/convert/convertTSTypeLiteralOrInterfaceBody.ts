@@ -3,6 +3,7 @@ import template from '@babel/template'
 import { FileConversionContext } from './ConversionContext'
 import NodeConversionError from '../NodeConversionError'
 import { NodePath } from '@babel/traverse'
+import isInexactIndexer from './isInexactIndexer'
 
 const templates = {
   object: template.expression`T.object(PROPS)`,
@@ -14,9 +15,21 @@ export default async function convertTSTypeLiteralOrInterfaceBody(
 ): Promise<t.Expression> {
   const required: t.ObjectProperty[] = []
   const optional: t.ObjectProperty[] = []
+  let inexact: boolean | undefined
   for (const _property of path.isTSTypeLiteral()
     ? path.get('members')
     : path.get('body')) {
+    if (_property.isTSIndexSignature()) {
+      const property: NodePath<t.TSIndexSignature> = _property
+      if (inexact != null || !isInexactIndexer(property.node))
+        throw new NodeConversionError(
+          `Unsupported object property`,
+          context.file,
+          property
+        )
+      inexact = true
+      continue
+    }
     if (!_property.isTSPropertySignature()) {
       throw new NodeConversionError(
         `Unsupported object property`,
@@ -47,13 +60,16 @@ export default async function convertTSTypeLiteralOrInterfaceBody(
     if (property.node.optional) optional.push(converted)
     else required.push(converted)
   }
-  if (!optional.length) {
+  if (!inexact && !optional.length) {
     return templates.object({
       T: await context.importT(),
       PROPS: t.objectExpression(required),
     })
   }
   const props: t.ObjectProperty[] = []
+  if (inexact) {
+    props.push(t.objectProperty(t.identifier('exact'), t.booleanLiteral(false)))
+  }
   if (required.length) {
     props.push(
       t.objectProperty(t.identifier('required'), t.objectExpression(required))
