@@ -13,8 +13,10 @@ import yargs from 'yargs'
 import prettier from 'prettier'
 import inquirer from 'inquirer'
 import defaultParseFile from './util/defaultParseFile'
+import ansiEscapes from 'ansi-escapes'
+import { glob, hasMagic } from 'glob-gitignore'
 
-const { _: files, quiet, write } = yargs
+const { _: fileArgs, quiet, write, check } = yargs
   .usage('$0 <files>')
   .option('q', {
     alias: 'quiet',
@@ -26,14 +28,46 @@ const { _: files, quiet, write } = yargs
     type: 'boolean',
     describe: 'write without asking for confirmation',
   })
+  .option('c', {
+    alias: 'check',
+    type: 'boolean',
+    describe: 'check that all validators match types',
+  })
   .help().argv
 
-if (!files.length) {
+if (!fileArgs.length) {
   yargs.showHelp()
   process.exit(1)
 }
 
+let needsClear = false
+
+const clearTemporary = () => {
+  if (needsClear) {
+    process.stderr.write(
+      ansiEscapes.cursorRestorePosition + ansiEscapes.eraseDown
+    )
+    needsClear = false
+  }
+}
+
+const writeTemporary = (text: string) => {
+  clearTemporary()
+  process.stderr.write(text)
+  needsClear = true
+}
+
 async function go(): Promise<void> {
+  const files = []
+  for (const arg of fileArgs) {
+    if (typeof arg !== 'string') continue
+    if (hasMagic(arg)) {
+      for (const file of await glob(arg)) files.push(file)
+    } else {
+      files.push(arg)
+    }
+  }
+
   const context = new ConversionContext({
     parseFile: defaultParseFile,
     resolve: (file: string, options: { basedir: string }): Promise<string> =>
@@ -43,21 +77,21 @@ async function go(): Promise<void> {
       }) as any,
   })
   try {
+    process.stdout.write(ansiEscapes.cursorSavePosition)
     await Promise.all(
       files.map(
-        async (file: string | number): Promise<void> => {
-          if (typeof file !== 'string') return
-          // eslint-disable-next-line no-console
-          if (!quiet) console.error('Processing', file)
+        async (file: string): Promise<void> => {
           await (await context.forFile(Path.resolve(file))).processFile()
+          if (!quiet) writeTemporary(file)
         }
       )
     )
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(error.stack)
-    return
+    process.exit(2)
   }
+
   const diffs = await Promise.all(
     [...context.files()].map(
       async (
@@ -81,6 +115,7 @@ async function go(): Promise<void> {
             ? 'typescript'
             : 'babel-flow'
         }
+        if (!quiet) writeTemporary(context.file)
         return {
           file,
           original: prettier.format(
@@ -95,6 +130,29 @@ async function go(): Promise<void> {
       }
     )
   )
+
+  clearTemporary()
+
+  if (check) {
+    let convertedCount = 0
+    for (const { file, original, converted } of diffs) {
+      if (converted !== original) {
+        // eslint-disable-next-line no-console
+        if (!quiet) console.warn(file)
+        convertedCount++
+      }
+    }
+    if (convertedCount) {
+      if (!quiet)
+        // eslint-disable-next-line no-console
+        console.warn(`${convertedCount} files need validators updated.`)
+      process.exit(1)
+    }
+    if (!quiet)
+      // eslint-disable-next-line no-console
+      console.warn(`All matched files are up-to-date!`)
+    process.exit(0)
+  }
   let convertedCount = 0
   for (const { file, original, converted } of diffs) {
     if (converted === original) {
@@ -107,7 +165,7 @@ async function go(): Promise<void> {
     console.error(`\n\n${file}\n======================================`)
     printDiff(original, converted)
   }
-  if (convertedCount === 0) return
+  if (convertedCount === 0) process.exit(0)
   if (!write) {
     const { write: _write } = await inquirer.prompt([
       {
@@ -116,7 +174,7 @@ async function go(): Promise<void> {
         default: false,
       },
     ])
-    if (!_write) return
+    if (!_write) process.exit(0)
   }
   await Promise.all(
     diffs

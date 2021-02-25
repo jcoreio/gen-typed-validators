@@ -5,7 +5,7 @@
   "main": "index.js",
   "sideEffects": false,
   "bin": {
-    "regen-typed-validators": "./cli.js"
+    "gen-typed-validators": "./cli.js"
   },
   "scripts": {
     "lint": "eslint $npm_package_config_lint",
@@ -124,6 +124,7 @@
     "@typescript-eslint/eslint-plugin": "^4.14.1",
     "@typescript-eslint/parser": "^4.14.1",
     "@typescript-eslint/typescript-estree": "^4.14.1",
+    "ansi-escapes": "^4.3.1",
     "babel-eslint": "^10.1.0",
     "babel-plugin-istanbul": "^6.0.0",
     "chai": "^4.2.0",
@@ -135,6 +136,7 @@
     "eslint": "^7.18.0",
     "eslint-config-prettier": "^7.2.0",
     "flow-bin": "^0.144.0",
+    "glob-gitignore": "^1.0.14",
     "husky": "^4.3.8",
     "istanbul": "^0.4.5",
     "lint-staged": "^10.5.3",
