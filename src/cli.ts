@@ -43,7 +43,7 @@ if (!fileArgs.length) {
 let needsClear = false
 
 const clearTemporary = () => {
-  if (needsClear) {
+  if (needsClear && !process.env.DEBUG_ARE_ASTS_EQUAL) {
     process.stderr.write(
       ansiEscapes.cursorRestorePosition + ansiEscapes.eraseDown
     )

@@ -1,6 +1,7 @@
 import * as t from '@babel/types'
 import template from '@babel/template'
 import traverse from '@babel/traverse'
+import generate from '@babel/generator'
 import convertTSRecordType, { isTSRecordType } from './convertTSRecordType'
 import convertObjectTypeAnnotation from './convertObjectTypeAnnotation'
 import convertInterfaceDeclaration from './convertInterfaceDeclaration'
@@ -17,8 +18,7 @@ import areReferencesEqual from './areReferencesEqual'
 import getKey from './getKey'
 import convertUtilityFlowType from './convertUtilityFlowType'
 import moveLeadingCommentsToNextSibling from './moveCommentsToNextSibling'
-import areASTsEqual from '../util/areASTsEqual'
-
+import areASTsEqual, { areASTsEqual_getMismatch } from '../util/areASTsEqual'
 import convertTSInterfaceDeclaration from './convertTSInterfaceDeclaration'
 
 const templates = {
@@ -140,7 +140,32 @@ export class FileConversionContext {
   }
 
   get changed(): boolean {
-    return this._dirty && !areASTsEqual(this.originalAST, this.processedAST)
+    if (this._dirty && !areASTsEqual(this.originalAST, this.processedAST)) {
+      if (process.env.DEBUG_ARE_ASTS_EQUAL) {
+        const mismatch = areASTsEqual_getMismatch(
+          this.originalAST,
+          this.processedAST
+        )
+        if (mismatch) {
+          // eslint-disable-next-line no-console
+          console.error(
+            `\nchange in ${this.file} is at: ${mismatch.path.join(', ')}`
+          )
+          // eslint-disable-next-line no-console
+          console.error(
+            `\noriginal:\n==============================\n\n`,
+            generate(this.originalAST).code
+          )
+          // eslint-disable-next-line no-console
+          console.error(
+            `\nprocessed:\n==============================\n\n`,
+            generate(this.processedAST).code
+          )
+        }
+      }
+      return true
+    }
+    return false
   }
 
   get getValidatorName(): GetValidatorName {
@@ -654,7 +679,7 @@ export class FileConversionContext {
             T: await this.importT(),
             VALUE: t.numericLiteral(type.value),
           }) as t.CallExpression,
-          { typeParameters: t.typeParameterInstantiation([type]) }
+          { typeArguments: t.typeParameterInstantiation([type]) }
         )
       case 'StringLiteralTypeAnnotation':
         return Object.assign(
@@ -662,7 +687,7 @@ export class FileConversionContext {
             T: await this.importT(),
             VALUE: t.stringLiteral(type.value),
           }) as t.CallExpression,
-          { typeParameters: t.typeParameterInstantiation([type]) }
+          { typeArguments: t.typeParameterInstantiation([type]) }
         )
       case 'BooleanLiteralTypeAnnotation':
         return Object.assign(
@@ -670,7 +695,7 @@ export class FileConversionContext {
             T: await this.importT(),
             VALUE: t.booleanLiteral(type.value),
           }) as t.CallExpression,
-          { typeParameters: t.typeParameterInstantiation([type]) }
+          { typeArguments: t.typeParameterInstantiation([type]) }
         )
       case 'TSLiteralType':
         switch (type.literal.type) {
