@@ -5,3 +5,218 @@
 [![semantic-release](https://img.shields.io/badge/%20%20%F0%9F%93%A6%F0%9F%9A%80-semantic--release-e10079.svg)](https://github.com/semantic-release/semantic-release)
 [![Commitizen friendly](https://img.shields.io/badge/commitizen-friendly-brightgreen.svg)](http://commitizen.github.io/cz-cli/)
 [![npm version](https://badge.fury.io/js/typed-validators-codemods.svg)](https://badge.fury.io/js/typed-validators-codemods)
+
+Automatically generate runtime validators from your Flow or TypeScript type definitions! (using `typed-validators`)
+
+# How it works
+
+Say you want to generate validators for a `User` type. Just add a `const UserType: t.TypeAlias<User> = null` declaration
+after it and run this codemod:
+
+```ts
+// User.ts
+
+export type Address = {
+  line1: string
+  line2?: string
+  city: string
+  zipCode: string
+}
+
+export type User = {
+  email: string
+  firstName?: string
+  lastName?: string
+  address?: Address
+}
+
+export const UserType: t.TypeAlias<User> = null
+```
+
+```diff
+$ gen-typed-validators User.ts
+
+/Users/andy/github/typed-validators-codemods/User.ts
+======================================
+
++ expected - actual
+
++import * as t from 'typed-validators'
+export type Address = {
+  line1: string
+  line2?: string
+  city: string
+  zipCode: string
+}
+
++export const AddressType: t.TypeAlias<Address> = t.alias(
++  'Address',
++  t.object({
++    required: {
++      line1: t.string(),
++      city: t.string(),
++      zipCode: t.string(),
++    },
++
++    optional: {
++      line2: t.string(),
++    },
++  })
++)
+
+export type User = {
+  email: string
+  firstName?: string
+  lastName?: string
+  address?: Address
+}
+
+-export const UserType: t.TypeAlias<User> = null
++export const UserType: t.TypeAlias<User> = t.alias(
++  'User',
++  t.object({
++    required: {
++      email: t.string(),
++    },
++
++    optional: {
++      firstName: t.string(),
++      lastName: t.string(),
++      address: t.ref(() => AddressType),
++    },
++  })
++)
+
+? write: (y/N)
+```
+
+# Type Walking
+
+Notice that the above example also creates an `AddressType` validator for the `Address` type, since `Address` is used in the `User` type. `gen-typed-validators` will walk all the dependent
+types, even if they're imported. For example:
+
+```ts
+// Address.ts
+
+export type Address = {
+  line1: string
+  line2?: string
+  city: string
+  zipCode: string
+}
+
+// User.ts
+
+export type User = {
+  email: string
+  firstName?: string
+  lastName?: string
+  address?: Address
+}
+
+export const UserType: t.TypeAlias<User> = null
+```
+
+```diff
+$ gen-typed-validators User.ts Address.ts
+
+
+/Users/andy/github/typed-validators-codemods/Address.ts
+======================================
+
++ expected - actual
+
++import * as t from 'typed-validators'
+ export type Address = {
+   line1: string
+   line2?: string
+   city: string
+   zipCode: string
+ }
++
++export const AddressType: t.TypeAlias<Address> = t.alias(
++  'Address',
++  t.object({
++    required: {
++      line1: t.string(),
++      city: t.string(),
++      zipCode: t.string(),
++    },
++
++    optional: {
++      line2: t.string(),
++    },
++  })
++)
+
+
+
+/Users/andy/github/typed-validators-codemods/User.ts
+======================================
+
++ expected - actual
+
+-import { Address } from './Address'
++import { Address, AddressType } from './Address'
+
++import * as t from 'typed-validators'
++
+ export type User = {
+   email: string
+   firstName?: string
+   lastName?: string
+   address?: Address
+ }
+
+-export const UserType: t.TypeAlias<User> = null
++export const UserType: t.TypeAlias<User> = t.alias(
++  'User',
++  t.object({
++    required: {
++      email: t.string(),
++    },
++
++    optional: {
++      firstName: t.string(),
++      lastName: t.string(),
++      address: t.ref(() => AddressType),
++    },
++  })
++)
+
+? write: (y/N)
+```
+
+# Limitations
+
+- Definitely not all types are supported. The goal will always be to support a subset of types that can be reliably validated at runtime.
+  Supported types:
+  - All primitive values
+  - `any`
+  - `unknown`/`mixed`
+  - Arrays
+  - Tuples
+  - Unions (`|`)
+  - Intersections (`&`)
+  - Objects or interfaces without indexers or methods
+    - Flow exception: only a single indexer, to indicate a record type (`{ [string]: number }`)
+    - TS execption: indexers to allow additional properties
+      - `{ foo: number, [string]: any }`
+      - `{ foo: number, [string]: unknown }`
+      - `{ foo: number, [string | symbol]: any }`
+      - `{ foo: number, [string | symbol]: unknown }`
+      - `{ foo: number, [any]: any }`
+      - `{ foo: number, [any]: unknown }`
+  - TS `Record` types
+  - Interface `extends`
+  - Flow exact and inexact object types
+  - Flow object type spread `{| foo: number, ...Bar |}`
+  - Class instance types
+  - Type aliases
+  - Readonly types are converted as-is (but not enforced at runtime, since readonly is strictly a compile-time hint):
+    - TS `readonly`
+    - Flow `$ReadOnly`
+    - Flow `$ReadOnlyArray`
+- Right now the generated validator name is `${typeName}Type` and this isn't customizable. In the future I could change it to infer from the starting validator declaration(s).
+- Imports from `node_modules` aren't currently supported. It may be possible in the future when a package already contains generated validators, and it can find them along with
+  the types in `.d.ts` or `.js.flow` files.
