@@ -6,7 +6,7 @@ import { promisify } from 'util'
 import ConversionContext, {
   FileConversionContext,
 } from './convert/ConversionContext'
-import printDiff from 'print-diff'
+import printDiff from './util/printDiff'
 import * as recast from 'recast'
 import * as Path from 'path'
 import yargs from 'yargs'

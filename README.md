@@ -36,18 +36,19 @@ export const UserType: t.TypeAlias<User> = null
 ```diff
 $ gen-typed-validators User.ts
 
-/Users/andy/github/gen-typed-validators/User.ts
+/Users/andy/github/typed-validators-codemods/User.ts
 ======================================
 
-+ expected - actual
++ modified - original
 
+@@ -1,15 +1,44 @@
 +import * as t from 'typed-validators'
-export type Address = {
-  line1: string
-  line2?: string
-  city: string
-  zipCode: string
-}
+ export type Address = {
+   line1: string
+   line2?: string
+   city: string
+   zipCode: string
+ }
 
 +export const AddressType: t.TypeAlias<Address> = t.alias(
 +  'Address',
@@ -63,13 +64,13 @@ export type Address = {
 +    },
 +  })
 +)
-
-export type User = {
-  email: string
-  firstName?: string
-  lastName?: string
-  address?: Address
-}
++
+ export type User = {
+   email: string
+   firstName?: string
+   lastName?: string
+   address?: Address
+ }
 
 -export const UserType: t.TypeAlias<User> = null
 +export const UserType: t.TypeAlias<User> = t.alias(
@@ -107,6 +108,8 @@ export type Address = {
 
 // User.ts
 
+import { Address } from './Address'
+
 export type User = {
   email: string
   firstName?: string
@@ -118,14 +121,14 @@ export const UserType: t.TypeAlias<User> = null
 ```
 
 ```diff
-$ gen-typed-validators User.ts Address.ts
+$ gen-typed-validators User.ts
 
-
-/Users/andy/github/gen-typed-validators/Address.ts
+/Users/andy/github/typed-validators-codemods/Address.ts
 ======================================
 
-+ expected - actual
++ modified - original
 
+@@ -1,6 +1,22 @@
 +import * as t from 'typed-validators'
  export type Address = {
    line1: string
@@ -151,11 +154,12 @@ $ gen-typed-validators User.ts Address.ts
 
 
 
-/Users/andy/github/gen-typed-validators/User.ts
+/Users/andy/github/typed-validators-codemods/User.ts
 ======================================
 
-+ expected - actual
++ modified - original
 
+@@ -1,10 +1,25 @@
 -import { Address } from './Address'
 +import { Address, AddressType } from './Address'
 
