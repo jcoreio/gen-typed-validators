@@ -1,5 +1,5 @@
 {
-  "name": "typed-validators-codemods",
+  "name": "gen-typed-validators",
   "version": "0.0.0-development",
   "description": "convert type annotations to typed-validators",
   "main": "index.js",
@@ -71,7 +71,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jcoreio/typed-validators-codemods.git"
+    "url": "https://github.com/jcoreio/gen-typed-validators.git"
   },
   "keywords": [
     "typed-validators",
@@ -82,9 +82,9 @@
   "author": "Andy Edwards",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/jcoreio/typed-validators-codemods/issues"
+    "url": "https://github.com/jcoreio/gen-typed-validators/issues"
   },
-  "homepage": "https://github.com/jcoreio/typed-validators-codemods#readme",
+  "homepage": "https://github.com/jcoreio/gen-typed-validators#readme",
   "devDependencies": {
     "@babel/cli": "^7.12.10",
     "@babel/core": "^7.12.10",

@@ -1,10 +1,10 @@
-# typed-validators-codemods
+# gen-typed-validators
 
-[![CircleCI](https://circleci.com/gh/jcoreio/typed-validators-codemods.svg?style=svg)](https://circleci.com/gh/jcoreio/typed-validators-codemods)
-[![Coverage Status](https://codecov.io/gh/jcoreio/typed-validators-codemods/branch/master/graph/badge.svg)](https://codecov.io/gh/jcoreio/typed-validators-codemods)
+[![CircleCI](https://circleci.com/gh/jcoreio/gen-typed-validators.svg?style=svg)](https://circleci.com/gh/jcoreio/gen-typed-validators)
+[![Coverage Status](https://codecov.io/gh/jcoreio/gen-typed-validators/branch/master/graph/badge.svg)](https://codecov.io/gh/jcoreio/gen-typed-validators)
 [![semantic-release](https://img.shields.io/badge/%20%20%F0%9F%93%A6%F0%9F%9A%80-semantic--release-e10079.svg)](https://github.com/semantic-release/semantic-release)
 [![Commitizen friendly](https://img.shields.io/badge/commitizen-friendly-brightgreen.svg)](http://commitizen.github.io/cz-cli/)
-[![npm version](https://badge.fury.io/js/typed-validators-codemods.svg)](https://badge.fury.io/js/typed-validators-codemods)
+[![npm version](https://badge.fury.io/js/gen-typed-validators.svg)](https://badge.fury.io/js/gen-typed-validators)
 
 Automatically generate runtime validators from your Flow or TypeScript type definitions! (using `typed-validators`)
 
@@ -36,7 +36,7 @@ export const UserType: t.TypeAlias<User> = null
 ```diff
 $ gen-typed-validators User.ts
 
-/Users/andy/github/typed-validators-codemods/User.ts
+/Users/andy/github/gen-typed-validators/User.ts
 ======================================
 
 + expected - actual
@@ -121,7 +121,7 @@ export const UserType: t.TypeAlias<User> = null
 $ gen-typed-validators User.ts Address.ts
 
 
-/Users/andy/github/typed-validators-codemods/Address.ts
+/Users/andy/github/gen-typed-validators/Address.ts
 ======================================
 
 + expected - actual
@@ -151,7 +151,7 @@ $ gen-typed-validators User.ts Address.ts
 
 
 
-/Users/andy/github/typed-validators-codemods/User.ts
+/Users/andy/github/gen-typed-validators/User.ts
 ======================================
 
 + expected - actual
