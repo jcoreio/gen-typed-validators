@@ -196,6 +196,7 @@ $ gen-typed-validators User.ts
 - Definitely not all types are supported. The goal will always be to support a subset of types that can be reliably validated at runtime.
 
   Supported types:
+
   - All primitive values
   - `any`
   - `unknown`/`mixed`
@@ -215,14 +216,14 @@ $ gen-typed-validators User.ts
   - TS `Record` types
   - Interface `extends`
   - Flow exact and inexact object types
-  - Flow object type spread `{| foo: number, ...Bar |}`
+  - Flow object type spread `{| foo: number, ...Bar |}`, `{ foo: number, ...$Exact<Bar>, ... }`
   - Class instance types
   - Type aliases
   - Readonly types are converted as-is (but not enforced at runtime, since readonly is strictly a compile-time hint):
     - TS `readonly`
     - Flow `$ReadOnly`
     - Flow `$ReadOnlyArray`
- 
+
 - Right now the generated validator name is `${typeName}Type` and this isn't customizable. In the future I could change it to infer from the starting validator declaration(s).
 - Imports from `node_modules` aren't currently supported. It may be possible in the future when a package already contains generated validators, and it can find them along with
   the types in `.d.ts` or `.js.flow` files.

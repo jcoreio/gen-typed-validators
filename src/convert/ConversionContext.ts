@@ -7,7 +7,7 @@ import convertObjectTypeAnnotation from './convertObjectTypeAnnotation'
 import convertInterfaceDeclaration from './convertInterfaceDeclaration'
 import NodeConversionError from '../NodeConversionError'
 import convertTSTypeLiteral from './convertTSTypeLiteralOrInterfaceBody'
-import { NodePath } from '@babel/traverse'
+import { NodePath, NodePaths } from '@babel/traverse'
 import { builtinClasses } from './builtinClasses'
 import { TSBindingVisitors } from '../ts/TSBindingVisitors'
 import getReifiedType from './getReifiedType'
@@ -114,9 +114,9 @@ export class FileConversionContext {
   public readonly originalAST: t.File
   public readonly processedAST: t.File
   /**
-   * Indicates the AST may have been modified.  false means it definitely hasn't been modified.
+   * Indicates the AST has been modified.
    */
-  private _dirty = false
+  private _changed = false
   private convertedTypeReferences: Map<
     t.Node,
     ConvertedTypeReference
@@ -140,7 +140,19 @@ export class FileConversionContext {
   }
 
   get changed(): boolean {
-    if (this._dirty && !areASTsEqual(this.originalAST, this.processedAST)) {
+    return this._changed
+  }
+
+  private replacePathWith<T extends t.Node>(
+    path: NodePath<any>,
+    replacement: T | NodePath<T>
+  ): [NodePath<T>] {
+    const replacementNode =
+      replacement instanceof NodePath ? replacement.node : replacement
+    const changed = !areASTsEqual(path.node, replacementNode)
+    const result = path.replaceWith(replacement)
+    if (changed) {
+      this._changed = true
       if (process.env.DEBUG_ARE_ASTS_EQUAL) {
         const mismatch = areASTsEqual_getMismatch(
           this.originalAST,
@@ -163,9 +175,16 @@ export class FileConversionContext {
           )
         }
       }
-      return true
     }
-    return false
+    return result
+  }
+
+  private insertAfterPath<Nodes extends t.Node | readonly t.Node[]>(
+    path: NodePath<any>,
+    nodes: Nodes
+  ): NodePaths<Nodes> {
+    this._changed = true
+    return path.insertAfter(nodes)
   }
 
   get getValidatorName(): GetValidatorName {
@@ -226,7 +245,7 @@ export class FileConversionContext {
     traverse(ast, {
       ImportDeclaration: (path: NodePath<t.ImportDeclaration>) => {
         if (path.node.source.value === 'flow-runtime') {
-          this._dirty = true
+          this._changed = true
           const validationImport = path.node.specifiers
             ? path.node.specifiers.find(
                 (s) =>
@@ -244,7 +263,7 @@ export class FileConversionContext {
               (validationImport.type === 'ImportSpecifier'
                 ? validationImport.importKind
                 : null) || path.node.importKind
-            path.insertAfter(newValidationImport)
+            this.insertAfterPath(path, newValidationImport)
           }
           moveLeadingCommentsToNextSibling(path)
           path.remove()
@@ -259,13 +278,11 @@ export class FileConversionContext {
     const reifiedType = getReifiedType(path)
     if (!reifiedType) return
 
-    this._dirty = true
-
     if (reifiedType.isGenericTypeAnnotation()) {
       const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
       const convertedUtility = await convertUtilityFlowType(this, genType)
       if (convertedUtility) {
-        path.replaceWith(convertedUtility)
+        this.replacePathWith(path, convertedUtility)
         return
       }
     }
@@ -279,7 +296,8 @@ export class FileConversionContext {
             ? (reifiedType as NodePath<t.GenericTypeAnnotation>).get('id')
             : (reifiedType as NodePath<t.TSTypeReference>).get('typeName')
         )
-        path.replaceWith(
+        this.replacePathWith(
+          path,
           await this.convertTypeReferenceToValidator({ converted, kind })
         )
         return
@@ -287,7 +305,7 @@ export class FileConversionContext {
         // ignore
       }
     }
-    path.replaceWith(await this.convert(reifiedType))
+    this.replacePathWith(path, await this.convert(reifiedType))
   }
 
   async replaceValidatorDeclarator(
@@ -296,13 +314,11 @@ export class FileConversionContext {
     const reifiedType = getReifiedType(path)
     if (!reifiedType) return
 
-    this._dirty = true
-
     if (reifiedType.isGenericTypeAnnotation()) {
       const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
       const convertedUtility = await convertUtilityFlowType(this, genType)
       if (convertedUtility) {
-        path.replaceWith(convertedUtility)
+        this.replacePathWith(path, convertedUtility)
         return
       }
     }
@@ -342,7 +358,7 @@ export class FileConversionContext {
       const preexisting = await this.preexistingImportT()
       if (preexisting) return preexisting
 
-      this._dirty = true
+      this._changed = true
 
       const ast = this.processedAST
       let program: NodePath<t.Program> | undefined
@@ -357,7 +373,10 @@ export class FileConversionContext {
       })
       const T = t.identifier(this.context.t.name)
       if (lastImport)
-        lastImport.insertAfter(templates.importTypedValidators({ T }) as any)
+        this.insertAfterPath(
+          lastImport,
+          templates.importTypedValidators({ T }) as any
+        )
       else if (program)
         program.unshiftContainer(
           'body',
@@ -368,8 +387,6 @@ export class FileConversionContext {
   )
 
   async convertExport(name: string): Promise<ConvertedTypeReference> {
-    this._dirty = true
-
     const ast = this.processedAST
     let pathToConvert: NodePath<any> | undefined
     if (name === 'default') {
@@ -426,7 +443,8 @@ export class FileConversionContext {
           pathToConvert
         )
       }
-      pathToConvert.parentPath.insertAfter(
+      this.insertAfterPath(
+        pathToConvert.parentPath as NodePath<t.ExportDefaultDeclaration>,
         t.exportNamedDeclaration(null, [
           t.exportSpecifier(result.converted, exported),
         ])
@@ -450,7 +468,8 @@ export class FileConversionContext {
         getKey(exportTypeSpecifier.exported) === 'default'
           ? this.getValidatorIdentifier('default')
           : result.converted
-      pathToConvert.parentPath.parentPath.insertAfter(
+      this.insertAfterPath(
+        pathToConvert.parentPath.parentPath,
         t.exportNamedDeclaration(null, [
           t.exportSpecifier(result.converted, exported),
         ])
@@ -483,6 +502,11 @@ export class FileConversionContext {
         if (binding) return await this.convertTypeReference(binding.path)
         if (builtinClasses.has(id.node.name))
           return { converted: id.node, kind: 'class' }
+        throw new NodeConversionError(
+          `identifier ${id.node.name} is not bound, and not a known builtin class`,
+          this.file,
+          path
+        )
         break
       }
       case 'ClassDeclaration':
@@ -537,12 +561,18 @@ export class FileConversionContext {
 
         const binding = path.scope.getBinding(validatorId.name)
         if (binding && binding.path.isVariableDeclarator()) {
-          binding.path.replaceWith(validator.declarations[0])
+          this.replacePathWith(
+            binding.path as NodePath<t.VariableDeclarator>,
+            validator.declarations[0]
+          )
         } else {
           const { parentPath } = path
           if (parentPath.isExportNamedDeclaration())
-            parentPath.insertAfter(t.exportNamedDeclaration(validator))
-          else path.insertAfter(validator)
+            this.insertAfterPath(
+              parentPath as NodePath<t.ExportNamedDeclaration>,
+              t.exportNamedDeclaration(validator)
+            )
+          else this.insertAfterPath(path, validator)
         }
         return { converted: validatorId, kind: 'alias' }
       }
@@ -604,7 +634,8 @@ export class FileConversionContext {
         if (importKind === 'type' || !areReferencesEqual(imported, converted)) {
           const finalPath =
             path.isImportDefaultSpecifier() && kind !== 'class'
-              ? (path.replaceWith(
+              ? (this.replacePathWith(
+                  path,
                   t.importSpecifier(specifier.local, t.identifier('default'))
                 )[0] as NodePath<
                   | t.ImportDefaultSpecifier
@@ -625,7 +656,7 @@ export class FileConversionContext {
                   areReferencesEqual(p.node.local, id)
               )
             if (!existing)
-              finalPath.insertAfter(t.importSpecifier(id, converted))
+              this.insertAfterPath(finalPath, t.importSpecifier(id, converted))
           }
         }
         return { converted: id, kind }
