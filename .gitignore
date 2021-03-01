@@ -11,5 +11,5 @@ node_modules
 !/src/**/*.js.flow
 !/test/**/*.ts
 !/test/**/*.js
-!/types
+!/types/**
 !/.babelrc.js
