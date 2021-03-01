@@ -2,7 +2,6 @@
   "name": "gen-typed-validators",
   "version": "0.0.0-development",
   "description": "convert type annotations to typed-validators",
-  "main": "index.js",
   "sideEffects": false,
   "bin": {
     "gen-typed-validators": "./cli.js"
