@@ -184,6 +184,7 @@ export class FileConversionContext {
     nodes: Nodes
   ): NodePaths<Nodes> {
     this._changed = true
+    path.node.trailingComments = null
     return path.insertAfter(nodes)
   }
 
@@ -490,6 +491,22 @@ export class FileConversionContext {
     return converted
   }
 
+  private async _convertIdentifierReference(
+    path: NodePath<any>,
+    identifier: string
+  ): Promise<ConvertedTypeReference> {
+    path.scope.path.traverse(TSBindingVisitors)
+    const binding = path.scope.getBinding(identifier)
+    if (binding) return await this.convertTypeReference(binding.path)
+    if (builtinClasses.has(identifier))
+      return { converted: t.identifier(identifier), kind: 'class' }
+    throw new NodeConversionError(
+      `identifier ${identifier} is not bound, and not a known builtin class`,
+      this.file,
+      path
+    )
+  }
+
   private async _convertTypeReference(
     path: NodePath<any>
   ): Promise<ConvertedTypeReference> {
@@ -497,17 +514,7 @@ export class FileConversionContext {
     switch (type.type) {
       case 'Identifier': {
         const id = path as NodePath<t.Identifier>
-        id.scope.path.traverse(TSBindingVisitors)
-        const binding = id.scope.getBinding(id.node.name)
-        if (binding) return await this.convertTypeReference(binding.path)
-        if (builtinClasses.has(id.node.name))
-          return { converted: id.node, kind: 'class' }
-        throw new NodeConversionError(
-          `identifier ${id.node.name} is not bound, and not a known builtin class`,
-          this.file,
-          path
-        )
-        break
+        return await this._convertIdentifierReference(path, id.node.name)
       }
       case 'ClassDeclaration':
         return { converted: type.id, kind: 'class' }
@@ -515,6 +522,23 @@ export class FileConversionContext {
       case 'TSInterfaceDeclaration':
       case 'TypeAlias':
       case 'TSTypeAliasDeclaration': {
+        if (type.leadingComments) {
+          for (const { value } of type.leadingComments) {
+            const match = /^\s*@gen-typed-validators\s+type:\s+([_a-zA-Z][_a-zA-Z0-9]*)/.exec(
+              value
+            )
+            if (match) {
+              const override = match[1].trim()
+              if (override === 'any')
+                return {
+                  converted: t.identifier('any'),
+                  kind: 'any',
+                }
+              return await this._convertIdentifierReference(path, override)
+            }
+          }
+        }
+
         const casePath = path as
           | NodePath<t.TypeAlias>
           | NodePath<t.InterfaceDeclaration>
@@ -678,6 +702,7 @@ export class FileConversionContext {
 
   async convert(path: NodePath<any>): Promise<t.Expression> {
     const type = path.node
+
     switch (type.type) {
       case 'MixedTypeAnnotation':
       case 'TSUnknownKeyword':

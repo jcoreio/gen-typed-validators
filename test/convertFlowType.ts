@@ -688,4 +688,68 @@ describe(`convertFlowType`, function () {
       }
     )
   })
+  it(`converts any in override comment`, async function () {
+    await integrationTest(
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          // @gen-typed-validators type: any
+          type Foog = {}
+          type Foo = {
+            bar: Foog
+          }
+          const FooType: t.TypeAlias<Foo> = null
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators' // @gen-typed-validators type: any
+          type Foog = {}
+          type Foo = {
+            bar: Foog
+          }
+          const FooType: t.TypeAlias<Foo> = t.alias(
+            'Foo',
+            t.object({
+              bar: t.any(),
+            })
+          )
+        `,
+      }
+    )
+  })
+  it(`converts type reference in override comment`, async function () {
+    await integrationTest(
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          type Bar = {}
+          // @gen-typed-validators type: Bar
+          type Foog = {}
+          type Foo = {
+            bar: Foog
+          }
+          const FooType: t.TypeAlias<Foo> = null
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          type Bar = {};
+          const BarType: t.TypeAlias<Bar> = t.alias("Bar", t.object({}));
+          // @gen-typed-validators type: Bar
+          type Foog = {}
+          type Foo = {
+            bar: Foog
+          }
+          const FooType: t.TypeAlias<Foo> = t.alias(
+            'Foo',
+            t.object({
+              bar: t.ref(() => BarType),
+            })
+          )
+        `,
+      }
+    )
+  })
 })
