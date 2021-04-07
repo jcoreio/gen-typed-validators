@@ -21,6 +21,10 @@ import moveLeadingCommentsToNextSibling from './moveCommentsToNextSibling'
 import areASTsEqual, { areASTsEqual_getMismatch } from '../util/areASTsEqual'
 import convertTSInterfaceDeclaration from './convertTSInterfaceDeclaration'
 
+import convertTSTypeOperator from './convertTSTypeOperator'
+
+import convertUtilityTSType from './convertUtilityTSType'
+
 const templates = {
   importTypedValidators: template.statement`import * as T from 'typed-validators'`,
   importValidation: template.statement`import { Validation as LOCAL } from 'typed-validators'`,
@@ -281,9 +285,25 @@ export class FileConversionContext {
 
     if (reifiedType.isGenericTypeAnnotation()) {
       const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
-      const convertedUtility = await convertUtilityFlowType(this, genType)
-      if (convertedUtility) {
-        this.replacePathWith(path, convertedUtility)
+      const converted = await convertUtilityFlowType(this, genType)
+      if (converted) {
+        this.replacePathWith(path, converted)
+        return
+      }
+    }
+    if (reifiedType.isTSTypeReference()) {
+      const genType = reifiedType as NodePath<t.TSTypeReference>
+      const converted = await convertUtilityTSType(this, genType)
+      if (converted) {
+        this.replacePathWith(path, converted)
+        return
+      }
+    }
+    if (reifiedType.isTSTypeOperator()) {
+      const typeOperator = reifiedType as NodePath<t.TSTypeOperator>
+      const converted = await convertTSTypeOperator(this, typeOperator)
+      if (converted) {
+        this.replacePathWith(path, converted)
         return
       }
     }
@@ -317,9 +337,25 @@ export class FileConversionContext {
 
     if (reifiedType.isGenericTypeAnnotation()) {
       const genType = reifiedType as NodePath<t.GenericTypeAnnotation>
-      const convertedUtility = await convertUtilityFlowType(this, genType)
-      if (convertedUtility) {
-        this.replacePathWith(path, convertedUtility)
+      const converted = await convertUtilityFlowType(this, genType)
+      if (converted) {
+        this.replacePathWith(path, converted)
+        return
+      }
+    }
+    if (reifiedType.isTSTypeReference()) {
+      const genType = reifiedType as NodePath<t.TSTypeReference>
+      const converted = await convertUtilityTSType(this, genType)
+      if (converted) {
+        this.replacePathWith(path, converted)
+        return
+      }
+    }
+    if (reifiedType.isTSTypeOperator()) {
+      const typeOperator = reifiedType as NodePath<t.TSTypeOperator>
+      const converted = await convertTSTypeOperator(this, typeOperator)
+      if (converted) {
+        this.replacePathWith(path, converted)
         return
       }
     }
@@ -871,6 +907,11 @@ export class FileConversionContext {
           this,
           path as NodePath<t.TSInterfaceDeclaration>
         )
+      case 'TSTypeOperator': {
+        const converted = await convertTSTypeOperator(this, path)
+        if (converted) return converted
+        break
+      }
       case 'GenericTypeAnnotation': {
         const convertedUtility = await convertUtilityFlowType(this, path)
         if (convertedUtility) return convertedUtility
@@ -897,6 +938,8 @@ export class FileConversionContext {
         )
       }
       case 'TSTypeReference': {
+        const convertedUtility = await convertUtilityTSType(this, path)
+        if (convertedUtility) return convertedUtility
         if (isTSRecordType(path)) return await convertTSRecordType(this, path)
         return await this.convertTypeReferenceToValidator(
           await this.convertTypeReference(

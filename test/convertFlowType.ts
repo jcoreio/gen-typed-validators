@@ -105,12 +105,15 @@ describe(`convertFlowType`, function () {
   test('?number', 't.nullishOr(t.number())')
   test('number[]', 't.array(t.number())')
   test('Array<number>', 't.array(t.number())')
-  test('$ReadOnlyArray<number>', 't.array(t.number())')
+  test('$ReadOnlyArray<number>', 't.readonlyArray(t.number())')
   test('[number, string]', 't.tuple(t.number(), t.string())')
   test('number | string', 't.oneOf(t.number(), t.string())')
   test('number & string', 't.allOf(t.number(), t.string())')
   test('{[string]: number}', 't.record(t.string(), t.number())')
-  test('$ReadOnly<{[string]: number}>', 't.record(t.string(), t.number())')
+  test(
+    '$ReadOnly<{[string]: number}>',
+    't.readonly(t.record(t.string(), t.number()))'
+  )
   test(
     `{ 'hello-world': string, ... }`,
     `t.object({

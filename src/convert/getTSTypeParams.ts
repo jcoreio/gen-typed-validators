@@ -5,11 +5,11 @@ import NodeConversionError from '../NodeConversionError'
 
 export default function getTSTypeParams(
   context: FileConversionContext,
-  path: NodePath<t.GenericTypeAnnotation>,
+  path: NodePath<t.TSTypeReference>,
   required: boolean | number = true
-): NodePath<t.FlowType>[] {
+): NodePath<t.TSType>[] {
   const typeParameters = path.get('typeParameters')
-  if (!typeParameters.isTypeParameterInstantiation()) {
+  if (!typeParameters.isTSTypeParameterInstantiation()) {
     if (!required) return []
     throw new NodeConversionError(
       `Missing required type parameter(s)`,
@@ -17,7 +17,7 @@ export default function getTSTypeParams(
       path
     )
   }
-  const params = (typeParameters as NodePath<t.TypeParameterInstantiation>).get(
+  const params = (typeParameters as NodePath<t.TSTypeParameterInstantiation>).get(
     'params'
   )
   if (

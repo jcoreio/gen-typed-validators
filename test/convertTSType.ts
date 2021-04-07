@@ -102,10 +102,17 @@ describe(`convertTSType`, function () {
   test(`'foo'`, `t.string('foo')`)
   test('true', 't.boolean(true)')
   test('number[]', 't.array(t.number())')
+  test('Array<number>', 't.array(t.number())')
+  test('readonly number[]', 't.readonlyArray(t.number())')
+  test('ReadonlyArray<number>', 't.readonlyArray(t.number())')
   test('[number, string]', 't.tuple(t.number(), t.string())')
   test('number | string', 't.oneOf(t.number(), t.string())')
   test('number & string', 't.allOf(t.number(), t.string())')
   test('Record<string, number>', 't.record(t.string(), t.number())')
+  test(
+    'Readonly<Record<string, number>>',
+    't.readonly(t.record(t.string(), t.number()))'
+  )
   test(
     `{ [foo]: string }`,
     `t.object({
