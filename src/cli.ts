@@ -16,7 +16,13 @@ import defaultParseFile from './util/defaultParseFile'
 import ansiEscapes from 'ansi-escapes'
 import { glob, hasMagic } from 'glob-gitignore'
 
-const { _: fileArgs, quiet, write, check } = yargs
+const {
+  _: fileArgs,
+  quiet,
+  write,
+  check,
+  'default-exact': defaultExact,
+} = yargs
   .usage('$0 <files>')
   .option('q', {
     alias: 'quiet',
@@ -32,6 +38,10 @@ const { _: fileArgs, quiet, write, check } = yargs
     alias: 'check',
     type: 'boolean',
     describe: 'check that all validators match types',
+  })
+  .option('default-exact', {
+    type: 'boolean',
+    describe: 'whether to treat ambiguously exact objects as exact or inexact',
   })
   .help().argv
 
@@ -70,6 +80,7 @@ async function go(): Promise<void> {
 
   const context = new ConversionContext({
     parseFile: defaultParseFile,
+    defaultExact,
     resolve: (file: string, options: { basedir: string }): Promise<string> =>
       promisify(resolve as any)(file, {
         ...options,
