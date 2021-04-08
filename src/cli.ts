@@ -12,7 +12,7 @@ import * as Path from 'path'
 import yargs from 'yargs'
 import prettier from 'prettier'
 import inquirer from 'inquirer'
-import defaultParseFile from './util/defaultParseFile'
+import { getParserAsync } from 'babel-parse-wild-code'
 import ansiEscapes from 'ansi-escapes'
 import { glob, hasMagic } from 'glob-gitignore'
 
@@ -79,7 +79,10 @@ async function go(): Promise<void> {
   }
 
   const context = new ConversionContext({
-    parseFile: defaultParseFile,
+    parseFile: async (file: string) =>
+      recast.parse(await fs.readFile(file, 'utf8'), {
+        parser: await getParserAsync(file, { tokens: true }),
+      }),
     defaultExact,
     resolve: (file: string, options: { basedir: string }): Promise<string> =>
       promisify(resolve as any)(file, {
