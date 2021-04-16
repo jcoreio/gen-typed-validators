@@ -204,6 +204,8 @@ $ gen-typed-validators User.ts
 
 # Limitations
 
+- This codemod currently doesn't preserve formatting, though if it finds `prettier` installed in your project, it will format the generated
+  code using `prettier`.
 - Definitely not all types are supported. The goal will always be to support a subset of types that can be reliably validated at runtime.
 
   Supported types:
