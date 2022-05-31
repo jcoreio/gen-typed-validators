@@ -47,7 +47,10 @@ const templates = {
   instanceOf: template.expression`T.instanceOf(() => CLASS)`,
   ref: template.expression`T.ref(() => TYPE)`,
   alias: template.statement`const ID = T.alias(NAME, TYPE)`,
-  aliasOpaque: template.statement`const ID = T.alias(NAME, t.opaque(() => TYPE))`,
+  aliasOpaque: template.statement(
+    `const ID = T.alias(NAME, t.opaque<OPAQUETYPE>(() => TYPE))`,
+    { plugins: [['flow', { all: true }]] }
+  ),
 }
 
 type GetValidatorName = (typeName: string) => string
@@ -613,6 +616,7 @@ export class FileConversionContext {
           ? templates.aliasOpaque({
               T,
               ID: validatorIdWithType,
+              OPAQUETYPE: t.identifier(id.name),
               NAME: t.stringLiteral(id.name),
               TYPE: await this.convert(casePath.get('impltype')),
             })
@@ -628,12 +632,6 @@ export class FileConversionContext {
                   : casePath
               ),
             }) as any)
-
-        if (casePath.isOpaqueType()) {
-          ;(validator as any).declarations[0].init.arguments[1].typeArguments = t.typeParameterInstantiation(
-            [t.genericTypeAnnotation(t.identifier(id.name))]
-          )
-        }
 
         const binding = path.scope.getBinding(validatorId.name)
         if (binding && binding.path.isVariableDeclarator()) {
