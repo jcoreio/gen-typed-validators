@@ -47,6 +47,7 @@ const templates = {
   instanceOf: template.expression`T.instanceOf(() => CLASS)`,
   ref: template.expression`T.ref(() => TYPE)`,
   alias: template.statement`const ID = T.alias(NAME, TYPE)`,
+  aliasOpaque: template.statement`const ID = T.alias(NAME, t.opaque(() => TYPE))`,
 }
 
 type GetValidatorName = (typeName: string) => string
@@ -608,20 +609,31 @@ export class FileConversionContext {
               )
             )
 
-        const validator: t.VariableDeclaration = templates.alias({
-          T,
-          ID: validatorIdWithType,
-          NAME: t.stringLiteral(id.name),
-          TYPE: await this.convert(
-            casePath.isTypeAlias()
-              ? casePath.get('right')
-              : casePath.isTSTypeAliasDeclaration()
-              ? casePath.get('typeAnnotation')
-              : casePath.isOpaqueType()
-              ? casePath.get('impltype')
-              : casePath
-          ),
-        }) as any
+        const validator: t.VariableDeclaration = casePath.isOpaqueType()
+          ? templates.aliasOpaque({
+              T,
+              ID: validatorIdWithType,
+              NAME: t.stringLiteral(id.name),
+              TYPE: await this.convert(casePath.get('impltype')),
+            })
+          : (templates.alias({
+              T,
+              ID: validatorIdWithType,
+              NAME: t.stringLiteral(id.name),
+              TYPE: await this.convert(
+                casePath.isTypeAlias()
+                  ? casePath.get('right')
+                  : casePath.isTSTypeAliasDeclaration()
+                  ? casePath.get('typeAnnotation')
+                  : casePath
+              ),
+            }) as any)
+
+        if (casePath.isOpaqueType()) {
+          ;(validator as any).declarations[0].init.arguments[1].typeArguments = t.typeParameterInstantiation(
+            [t.genericTypeAnnotation(t.identifier(id.name))]
+          )
+        }
 
         const binding = path.scope.getBinding(validatorId.name)
         if (binding && binding.path.isVariableDeclarator()) {

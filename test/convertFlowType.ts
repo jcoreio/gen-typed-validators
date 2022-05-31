@@ -183,7 +183,7 @@ describe(`convertFlowType`, function () {
           export opaque type DateTimeISOString = string
           const DateTimeISOStringType: t.TypeAlias<DateTimeISOString> = t.alias(
             'DateTimeISOString',
-            t.string()
+            t.opaque<DateTimeISOString>(() => t.string())
           )
         `,
       }
