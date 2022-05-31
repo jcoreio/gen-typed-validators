@@ -168,6 +168,27 @@ describe(`convertFlowType`, function () {
     /Multiple indexers aren't supported/
   )
 
+  it(`converts locally reified opaque type`, async function () {
+    await integrationTest(
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          export opaque type DateTimeISOString = string
+          const DateTimeISOStringType: t.TypeAlias<DateTimeISOString> = null
+        `,
+      },
+      {
+        '/a': `
+          import * as t from 'typed-validators'
+          export opaque type DateTimeISOString = string
+          const DateTimeISOStringType: t.TypeAlias<DateTimeISOString> = t.alias(
+            'DateTimeISOString',
+            t.string()
+          )
+        `,
+      }
+    )
+  })
   it(`converts locally reified spread type aliases`, async function () {
     await integrationTest(
       {

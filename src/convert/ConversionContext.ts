@@ -557,6 +557,7 @@ export class FileConversionContext {
       case 'InterfaceDeclaration':
       case 'TSInterfaceDeclaration':
       case 'TypeAlias':
+      case 'OpaqueType':
       case 'TSTypeAliasDeclaration': {
         if (type.leadingComments) {
           for (const { value } of type.leadingComments) {
@@ -577,6 +578,7 @@ export class FileConversionContext {
 
         const casePath = path as
           | NodePath<t.TypeAlias>
+          | NodePath<t.OpaqueType>
           | NodePath<t.InterfaceDeclaration>
           | NodePath<t.TSTypeAliasDeclaration>
 
@@ -615,6 +617,8 @@ export class FileConversionContext {
               ? casePath.get('right')
               : casePath.isTSTypeAliasDeclaration()
               ? casePath.get('typeAnnotation')
+              : casePath.isOpaqueType()
+              ? casePath.get('impltype')
               : casePath
           ),
         }) as any
